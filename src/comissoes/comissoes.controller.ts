@@ -24,6 +24,14 @@ import { UpdateMembroComissaoDto } from './dto/update-membro-comissao.dto.js';
 export class ComissoesController {
   constructor(private readonly comissoesService: ComissoesService) {}
 
+  @Get('minhas/:organizacaoId')
+  listarMinhas(
+    @Param('organizacaoId') organizacaoId: string,
+    @Req() req: RequisicaoAutenticada,
+  ) {
+    return this.comissoesService.listarMinhas(organizacaoId, req.usuario.sub);
+  }
+
   @Get('organizacoes')
   listarOrganizacoes(@Req() req: RequisicaoAutenticada) {
     return this.comissoesService.listarOrganizacoes(req.usuario.sub);

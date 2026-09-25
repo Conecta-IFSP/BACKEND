@@ -92,6 +92,39 @@ describe('Regras de comissões', () => {
     return { service, comissoes, organizacoes, usuarios, comissao };
   }
 
+  it('permite ao membro consultar somente suas comissões na organização escolhida', async () => {
+    const { service, comissoes } = preparar();
+    const resultado = await service.listarMinhas(organizacaoId, membroId);
+    expect(comissoes.find).toHaveBeenCalledWith({
+      organizacao_id: new Types.ObjectId(organizacaoId),
+      'membros.usuario_id': new Types.ObjectId(membroId),
+    });
+    expect(resultado.comissoes[0].meu_papel).toBe('MEMBRO');
+    expect(resultado.comissoes[0]).not.toHaveProperty('membros');
+    await expect(service.atualizar(comissaoId, { nome: 'Alteração' }, membroId))
+      .rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it.each([
+    { statusMembro: 'PENDENTE' },
+    { statusMembro: 'REJEITADO' },
+    { statusOrganizacao: 'REVOGADA' },
+    { statusOrganizacao: 'PENDENTE' },
+    { usuarioAtivo: false },
+  ])('bloqueia consulta de participação sem vínculo válido: %j', async (opcoes) => {
+    const { service, comissoes } = preparar(opcoes);
+    await expect(service.listarMinhas(organizacaoId, adminId)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(comissoes.find).not.toHaveBeenCalled();
+  });
+
+  it('bloqueia consulta por usuário externo e aceita ausência de comissões', async () => {
+    const { service, comissoes } = preparar();
+    await expect(service.listarMinhas(organizacaoId, new Types.ObjectId().toString()))
+      .rejects.toBeInstanceOf(ForbiddenException);
+    comissoes.find.mockReturnValue(consulta([]));
+    expect((await service.listarMinhas(organizacaoId, membroId)).comissoes).toEqual([]);
+  });
+
   it('permite cadastrar na organização administrada e inicia equipe vazia', async () => {
     const { service, comissoes } = preparar();
     await service.criar({ nome: 'Eventos', organizacao_id: organizacaoId }, adminId);

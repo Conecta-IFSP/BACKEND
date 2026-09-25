@@ -107,6 +107,34 @@ export class ComissoesService {
       .exec();
   }
 
+  async listarMinhas(organizacaoId: string, usuarioId: string) {
+    this.validarId(organizacaoId);
+    await this.validarUsuario(usuarioId);
+    const organizacao = await this.organizacaoModel.findById(organizacaoId).exec();
+    if (!organizacao) throw new NotFoundException('Organização não encontrada');
+    const membro = organizacao.membros.some((item) =>
+      item.usuario_id.toString() === usuarioId &&
+      item.status === StatusMembroOrganizacao.APROVADO,
+    );
+    if (!membro || organizacao.status !== StatusOrganizacao.APROVADA) {
+      throw new ForbiddenException('Você precisa ser membro aprovado de uma organização autorizada');
+    }
+    const comissoes = await this.comissaoModel.find({
+      organizacao_id: organizacao._id,
+      'membros.usuario_id': new Types.ObjectId(usuarioId),
+    }).select('nome descricao ativo membros').sort({ nome: 1 }).exec();
+    return {
+      organizacao: { _id: organizacao._id, nome: organizacao.nome },
+      comissoes: comissoes.map((comissao) => ({
+        _id: comissao._id,
+        nome: comissao.nome,
+        descricao: comissao.descricao,
+        ativo: comissao.ativo,
+        meu_papel: comissao.membros.find((item) => item.usuario_id.toString() === usuarioId)?.papel,
+      })),
+    };
+  }
+
   async listarMembrosDisponiveis(organizacaoId: string, usuarioId: string) {
     const organizacao = await this.autorizarOrganizacao(
       organizacaoId,
