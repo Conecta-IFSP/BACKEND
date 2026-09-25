@@ -101,10 +101,7 @@ export class AuthService {
     usuario.reset_senha_expira_em = new Date(Date.now() + DURACAO_TOKEN_RECUPERACAO_MS);
     await usuario.save();
 
-    const linkBase =
-      this.configService.get<string>('APP_RESET_URL') ??
-      'http://localhost:8081/login/redefinir-senha';
-    const link = `${linkBase}?token=${encodeURIComponent(token)}`;
+    const link = this.criarLinkDoEmail(token, recuperarContaDto.redirect_url);
 
     await this.criarTransportador().sendMail({
       from: this.configService.get<string>('MAIL_FROM') ?? 'Conecta+ <nao-responda@conectamais.local>',
@@ -144,8 +141,96 @@ export class AuthService {
     return { mensagem: 'Senha redefinida com sucesso' };
   }
 
+  criarPaginaRedefinicao(token: string, redirectUrl: string) {
+    if (!/^[a-f0-9]{64}$/i.test(token ?? '')) {
+      throw new BadRequestException('O link de recuperação é inválido');
+    }
+
+    const linkExpo = new URL(this.validarUrlExpo(redirectUrl));
+    linkExpo.searchParams.set('token', token);
+    const destino = linkExpo.toString();
+    const destinoHtml = this.escaparHtml(destino);
+    const destinoJs = JSON.stringify(destino).replace(/</g, '\\u003c');
+
+    return `<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Redefinir senha - Conecta+</title>
+    <style>
+      body{margin:0;font-family:Arial,sans-serif;background:#f4f6fb;color:#182033;display:grid;min-height:100vh;place-items:center;padding:24px;box-sizing:border-box}
+      main{width:min(440px,100%);background:#fff;border-radius:18px;padding:32px;box-shadow:0 12px 36px #1725541f;text-align:center}
+      h1{margin:0 0 12px;font-size:26px}p{line-height:1.5;color:#526078}
+      a{display:block;margin-top:24px;padding:14px 18px;border-radius:10px;background:#256ef1;color:#fff;text-decoration:none;font-weight:700}
+      small{display:block;margin-top:18px;color:#718096}
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Abrir o Conecta+</h1>
+      <p>Estamos abrindo a tela de redefinição de senha no Expo Go.</p>
+      <a href="${destinoHtml}">Abrir no Expo Go</a>
+      <small>Mantenha o Expo aberto no computador e o celular na mesma rede.</small>
+    </main>
+    <script>window.location.href=${destinoJs};</script>
+  </body>
+</html>`;
+  }
+
   private hashToken(token: string) {
     return createHash('sha256').update(token).digest('hex');
+  }
+
+  private criarLinkDoEmail(token: string, urlDoAplicativo?: string) {
+    if (urlDoAplicativo) {
+      try {
+        const urlExpo = this.validarUrlExpo(urlDoAplicativo);
+        const enderecoExpo = new URL(urlExpo);
+        const pagina = new URL('http://localhost');
+        pagina.hostname = enderecoExpo.hostname;
+        pagina.port = String(this.configService.get<number>('PORT') ?? 3000);
+        pagina.pathname = '/auth/abrir-redefinicao';
+        pagina.search = '';
+        pagina.hash = '';
+        pagina.searchParams.set('token', token);
+        pagina.searchParams.set('redirect_url', urlExpo);
+        return pagina.toString();
+      } catch {
+        // Usa abaixo a URL configurada no servidor.
+      }
+    }
+
+    const link = new URL(
+      this.configService.get<string>('APP_RESET_URL') ??
+        'http://localhost:8081/login/redefinir-senha',
+    );
+    link.searchParams.set('token', token);
+    return link.toString();
+  }
+
+  private validarUrlExpo(valor: string) {
+    try {
+      const url = new URL(valor);
+      const protocoloExpo = url.protocol === 'exp:' || url.protocol === 'exps:';
+      const rotaCorreta = url.pathname === '/--/login/redefinir-senha';
+
+      if (protocoloExpo && url.hostname && rotaCorreta && !url.search && !url.hash) {
+        return url.toString();
+      }
+    } catch {
+      // A mensagem pública é a mesma para qualquer URL inválida.
+    }
+
+    throw new BadRequestException('O endereço do Expo Go é inválido');
+  }
+
+  private escaparHtml(valor: string) {
+    return valor
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
 
   private smtpConfigurado() {

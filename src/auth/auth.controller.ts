@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Header, Post, Query } from '@nestjs/common';
 
 import { AuthService } from './auth.service.js';
 import { LoginDto } from './dto/login.dto.js';
@@ -22,5 +22,14 @@ export class AuthController {
   @Post('redefinir-senha')
   redefinirSenha(@Body() redefinirSenhaDto: RedefinirSenhaDto) {
     return this.authService.redefinirSenha(redefinirSenhaDto);
+  }
+
+  @Get('abrir-redefinicao')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  abrirRedefinicao(
+    @Query('token') token: string,
+    @Query('redirect_url') redirectUrl: string,
+  ) {
+    return this.authService.criarPaginaRedefinicao(token, redirectUrl);
   }
 }
