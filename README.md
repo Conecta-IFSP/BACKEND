@@ -83,7 +83,7 @@ In production applications, observability is essential for understanding how you
 - **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
 - **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
 - **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
+- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickl.
 
 ## Resources
 
