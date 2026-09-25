@@ -1,22 +1,22 @@
-# Conecta+ | Frontend
+# Conecta+ | Backend
 
-Frontend do projeto acadêmico **Conecta+**, desenvolvido em React Native com Expo.
-
-O aplicativo é responsável pela interface mobile do sistema, permitindo o acesso às funcionalidades de gerenciamento de reuniões.
+Backend do projeto acadêmico **Conecta+**, responsável pela API, regras de negócio e comunicação com o banco de dados.
 
 ## Tecnologias
 
-- React Native
-- Expo
-- Expo Router
+- Node.js
+- NestJS
 - TypeScript
+- MongoDB
+- Mongoose
+- JWT
 
 ## Como executar
 
 Clone o repositório:
 
 ```bash
-git clone https://github.com/Conecta-IFSP/FRONTEND.git
+git clone https://github.com/Conecta-IFSP/BACKEND.git
 ```
 
 Instale as dependências:
@@ -25,19 +25,23 @@ Instale as dependências:
 npm install
 ```
 
-Execute o projeto:
+Execute em modo de desenvolvimento:
 
 ```bash
-npm start
+npm run start:dev
 ```
 
-O aplicativo pode ser executado utilizando o **Expo Go** ou um emulador Android/iOS.
+Por padrão, a API será executada em:
 
-## Backend
+```text
+http://localhost:3000
+```
 
-O aplicativo consome a API disponível no repositório:
+## Frontend
 
-[Conecta-IFSP/BACKEND](https://github.com/Conecta-IFSP/BACKEND)
+A aplicação mobile está disponível em:
+
+[Conecta-IFSP/FRONTEND](https://github.com/Conecta-IFSP/FRONTEND)
 
 ## Documentação
 
