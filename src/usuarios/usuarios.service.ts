@@ -77,6 +77,7 @@ export class UsuariosService implements OnApplicationBootstrap {
       email,
       senha_hash: senhaHash,
       tema: createUsuarioDto.tema,
+      email_verificado: false,
     });
 
     return this.usuarioModel.findById(usuario._id).exec();

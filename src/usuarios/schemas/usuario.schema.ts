@@ -66,6 +66,16 @@ export class Usuario {
   @Prop({ select: false })
   reset_senha_expira_em?: Date;
 
+  @Prop({ select: false })
+  verificacao_email_codigo_hash?: string;
+
+  @Prop({ select: false })
+  verificacao_email_expira_em?: Date;
+
+  // Contas antigas não possuem este campo e devem continuar acessíveis.
+  @Prop({ default: true })
+  email_verificado: boolean;
+
   @Prop({
     default: true,
   })

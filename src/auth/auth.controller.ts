@@ -4,6 +4,7 @@ import { AuthService } from './auth.service.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RecuperarContaDto } from './dto/recuperar-conta.dto.js';
 import { RedefinirSenhaDto } from './dto/redefinir-senha.dto.js';
+import { VerificarCadastroDto } from './dto/verificar-cadastro.dto.js';
 
 @Controller('auth')
 export class AuthController {
@@ -12,6 +13,11 @@ export class AuthController {
   @Post('login')
   login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
+  }
+
+  @Post('verificar-cadastro')
+  verificarCadastro(@Body() dto: VerificarCadastroDto) {
+    return this.authService.verificarCadastro(dto);
   }
 
   @Post('recuperar-conta')

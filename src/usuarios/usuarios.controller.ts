@@ -17,14 +17,22 @@ import { AtualizarPerfilDto } from './dto/atualizar-perfil.dto.js';
 import { AlterarSenhaDto } from './dto/alterar-senha.dto.js';
 import { JwtAuthGuard, type RequisicaoAutenticada } from '../auth/jwt-auth.guard.js';
 import { AdminSistemaGuard } from '../auth/admin-sistema.guard.js';
+import { AuthService } from '../auth/auth.service.js';
 
 @Controller('usuarios')
 export class UsuariosController {
-  constructor(private readonly usuariosService: UsuariosService) {}
+  constructor(
+    private readonly usuariosService: UsuariosService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Post()
   criar(@Body() createUsuarioDto: CreateUsuarioDto) {
-    return this.usuariosService.criar(createUsuarioDto);
+    return this.usuariosService.criar(createUsuarioDto).then(async (usuario) => {
+      if (!usuario) return usuario;
+      await this.authService.enviarCodigoVerificacao(usuario._id.toString());
+      return { mensagem: 'Conta criada. Confira seu e-mail para finalizar o cadastro.' };
+    });
   }
 
   @UseGuards(JwtAuthGuard, AdminSistemaGuard)

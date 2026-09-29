@@ -18,8 +18,11 @@ import {
 import { LoginDto } from './dto/login.dto.js';
 import { RecuperarContaDto } from './dto/recuperar-conta.dto.js';
 import { RedefinirSenhaDto } from './dto/redefinir-senha.dto.js';
+import { VerificarCadastroDto } from './dto/verificar-cadastro.dto.js';
 
 const DURACAO_TOKEN_RECUPERACAO_MS = 30 * 60 * 1000;
+const DURACAO_CODIGO_VERIFICACAO_MS = 30 * 60 * 1000;
+const CARACTERES_CODIGO = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 @Injectable()
 export class AuthService {
@@ -50,6 +53,10 @@ export class AuthService {
 
     if (!usuario.ativo) {
       throw new UnauthorizedException('Usuário desativado');
+    }
+
+    if (usuario.email_verificado === false) {
+      throw new UnauthorizedException('Confirme seu e-mail antes de entrar');
     }
 
     // O campo atual tem precedência, inclusive após redefinir a senha.
@@ -83,6 +90,47 @@ export class AuthService {
         tema: usuario.tema,
       },
     };
+  }
+
+  async enviarCodigoVerificacao(id: string) {
+    const usuario = await this.usuarioModel.findById(id).exec();
+    if (!usuario || usuario.email_verificado) return;
+
+    const codigo = this.gerarCodigoVerificacao();
+    usuario.verificacao_email_codigo_hash = this.hashToken(codigo);
+    usuario.verificacao_email_expira_em = new Date(Date.now() + DURACAO_CODIGO_VERIFICACAO_MS);
+    await usuario.save();
+
+    await this.criarTransportador().sendMail({
+      from: this.configService.get<string>('MAIL_FROM') ?? 'Conecta+ <nao-responda@conectamais.local>',
+      to: usuario.email,
+      subject: 'Confirme seu cadastro no Conecta+',
+      text: `Olá, ${usuario.nome}. Seu código de confirmação é ${codigo}. Ele expira em 30 minutos.`,
+      html: `<p>Olá, ${usuario.nome}.</p><p>Use este código para finalizar seu cadastro:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">${codigo.slice(0, 3)}-${codigo.slice(3)}</p><p>O código expira em 30 minutos.</p>`,
+    });
+    if (!this.smtpConfigurado()) console.log(`[desenvolvimento] Código de verificação para ${usuario.email}: ${codigo.slice(0, 3)}-${codigo.slice(3)}`);
+  }
+
+  async verificarCadastro(dto: VerificarCadastroDto) {
+    const email = dto.email.toLowerCase().trim();
+    const codigo = dto.codigo.replace('-', '').toUpperCase();
+    const usuario = await this.usuarioModel.findOne({ email }).select('+verificacao_email_codigo_hash +verificacao_email_expira_em').exec();
+    if (!usuario || usuario.email_verificado || codigo.length !== 7 || !/^[A-Z0-9]{7}$/.test(codigo) ||
+      usuario.verificacao_email_codigo_hash !== this.hashToken(codigo) ||
+      !usuario.verificacao_email_expira_em || usuario.verificacao_email_expira_em <= new Date()) {
+      throw new BadRequestException('O código de confirmação é inválido ou expirou');
+    }
+    usuario.email_verificado = true;
+    usuario.verificacao_email_codigo_hash = undefined;
+    usuario.verificacao_email_expira_em = undefined;
+    await usuario.save();
+    return { mensagem: 'Cadastro confirmado com sucesso' };
+  }
+
+  private gerarCodigoVerificacao() {
+    let codigo = '';
+    for (let i = 0; i < 7; i++) codigo += CARACTERES_CODIGO[randomBytes(1)[0] % CARACTERES_CODIGO.length];
+    return codigo;
   }
 
   async solicitarRecuperacao(recuperarContaDto: RecuperarContaDto) {
