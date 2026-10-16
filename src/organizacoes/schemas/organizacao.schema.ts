@@ -18,6 +18,7 @@ export enum StatusMembroOrganizacao {
   PENDENTE = 'PENDENTE',
   APROVADO = 'APROVADO',
   REJEITADO = 'REJEITADO',
+  CONVIDADO = 'CONVIDADO',
 }
 
 @Schema({ _id: false })

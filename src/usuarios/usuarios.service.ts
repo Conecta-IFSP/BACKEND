@@ -37,7 +37,6 @@ export class UsuariosService implements OnApplicationBootstrap {
     private readonly usuarioModel: Model<UsuarioDocument>,
   ) {}
 
-  /** Garante que sempre exista um administrador do sistema após a conexão com o banco. */
   async onApplicationBootstrap() {
     const nome = process.env.ROOT_USER_NAME?.trim() || ADMIN_PADRAO.nome;
     const email = (process.env.ROOT_USER_EMAIL?.trim() || ADMIN_PADRAO.email).toLowerCase();

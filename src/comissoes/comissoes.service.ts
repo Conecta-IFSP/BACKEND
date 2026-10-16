@@ -50,6 +50,15 @@ export class ComissoesService {
       throw new ForbiddenException('Usuário sem acesso ativo');
   }
 
+  private administra(organizacao: Pick<Organizacao, 'membros'>, usuarioId: string) {
+    return organizacao.membros.some(
+      (membro) =>
+        membro.usuario_id.toString() === usuarioId &&
+        membro.papel === PapelOrganizacao.ADMIN &&
+        membro.status === StatusMembroOrganizacao.APROVADO,
+    );
+  }
+
   private async autorizarOrganizacao(organizacaoId: string, usuarioId: string) {
     this.validarId(organizacaoId);
     await this.validarUsuario(usuarioId);
@@ -57,15 +66,29 @@ export class ComissoesService {
       .findById(organizacaoId)
       .exec();
     if (!organizacao) throw new NotFoundException('Organização não encontrada');
-    const administrador = organizacao.membros.some(
+    if (!this.administra(organizacao, usuarioId) || organizacao.status !== StatusOrganizacao.APROVADA) {
+      throw new ForbiddenException(
+        'Apenas administradores da organização podem gerenciar comissões',
+      );
+    }
+    return organizacao;
+  }
+
+  private async autorizarLeitura(organizacaoId: string, usuarioId: string) {
+    this.validarId(organizacaoId);
+    await this.validarUsuario(usuarioId);
+    const organizacao = await this.organizacaoModel
+      .findById(organizacaoId)
+      .exec();
+    if (!organizacao) throw new NotFoundException('Organização não encontrada');
+    const aprovado = organizacao.membros.some(
       (membro) =>
         membro.usuario_id.toString() === usuarioId &&
-        membro.papel === PapelOrganizacao.ADMIN &&
         membro.status === StatusMembroOrganizacao.APROVADO,
     );
-    if (!administrador || organizacao.status !== StatusOrganizacao.APROVADA) {
+    if (!aprovado || organizacao.status !== StatusOrganizacao.APROVADA) {
       throw new ForbiddenException(
-        'Apenas administradores aprovados de uma organização autorizada podem gerenciar comissões',
+        'Você não tem acesso às comissões desta organização',
       );
     }
     return organizacao;
@@ -163,28 +186,64 @@ export class ComissoesService {
   }
 
   async listar(usuarioId: string, organizacaoId?: string) {
-    let ids: Types.ObjectId[];
     if (organizacaoId !== undefined) {
-      const organizacao = await this.autorizarOrganizacao(
-        organizacaoId,
-        usuarioId,
-      );
-      ids = [organizacao._id];
-    } else {
-      ids = (await this.listarOrganizacoes(usuarioId)).map(
-        (organizacao) => organizacao._id,
+      const organizacao = await this.autorizarLeitura(organizacaoId, usuarioId);
+      return this.consultar(
+        this.administra(organizacao, usuarioId)
+          ? { organizacao_id: organizacao._id }
+          : { organizacao_id: organizacao._id, 'membros.usuario_id': new Types.ObjectId(usuarioId) },
       );
     }
+
+    await this.validarUsuario(usuarioId);
+    const meuId = new Types.ObjectId(usuarioId);
+    const organizacoes = await this.organizacaoModel
+      .find({
+        status: StatusOrganizacao.APROVADA,
+        membros: {
+          $elemMatch: { usuario_id: meuId, status: StatusMembroOrganizacao.APROVADO },
+        },
+      })
+      .select('membros')
+      .exec();
+    const administradas = organizacoes
+      .filter((organizacao) => this.administra(organizacao, usuarioId))
+      .map((organizacao) => organizacao._id);
+    const participa = organizacoes
+      .filter((organizacao) => !this.administra(organizacao, usuarioId))
+      .map((organizacao) => organizacao._id);
+    return this.consultar({
+      $or: [
+        { organizacao_id: { $in: administradas } },
+        { organizacao_id: { $in: participa }, 'membros.usuario_id': meuId },
+      ],
+    });
+  }
+
+  async buscarPorId(id: string, usuarioId: string) {
+    this.validarId(id);
+    const comissao = await this.comissaoModel.findById(id).exec();
+    if (!comissao) throw new NotFoundException('Comissão não encontrada');
+    const organizacao = await this.autorizarLeitura(
+      comissao.organizacao_id.toString(),
+      usuarioId,
+    );
+    const naEquipe = comissao.membros.some(
+      (membro) => membro.usuario_id.toString() === usuarioId,
+    );
+    if (!this.administra(organizacao, usuarioId) && !naEquipe) {
+      throw new ForbiddenException('Você não faz parte desta comissão');
+    }
+    return this.popular(comissao);
+  }
+
+  private consultar(filtro: Record<string, unknown>) {
     return this.comissaoModel
-      .find({ organizacao_id: { $in: ids } })
+      .find(filtro)
       .populate('organizacao_id', 'nome status')
       .populate('membros.usuario_id', 'nome email ativo')
       .sort({ criado_em: -1 })
       .exec();
-  }
-
-  async buscarPorId(id: string, usuarioId: string) {
-    return this.popular(await this.autorizarComissao(id, usuarioId));
   }
 
   async atualizar(id: string, dto: UpdateComissaoDto, usuarioId: string) {
@@ -229,7 +288,6 @@ export class ComissoesService {
         'O usuário precisa estar ativo e ser membro aprovado da organização',
       );
     }
-    // O filtro impede integrantes duplicados mesmo em solicitações simultâneas.
     const atualizado = await this.comissaoModel
       .findOneAndUpdate(
         {

@@ -26,6 +26,9 @@ describe('Rotas autenticadas de organizações', () => {
     adicionarMembro: vi.fn().mockResolvedValue({}),
     atualizarStatusMembro: vi.fn().mockResolvedValue({}),
     removerMembro: vi.fn().mockResolvedValue({}),
+    alterarPapelMembro: vi.fn().mockResolvedValue({}),
+    convidarMembro: vi.fn().mockResolvedValue({}),
+    responderConvite: vi.fn().mockResolvedValue({}),
   };
 
   beforeEach(async () => {
@@ -82,6 +85,18 @@ describe('Rotas autenticadas de organizações', () => {
     await request(servidor)
       .patch(`/organizacoes/${orgId}/membros/${usuarioId}`)
       .send({ status: 'APROVADO' })
+      .expect(401);
+    await request(servidor)
+      .patch(`/organizacoes/${orgId}/membros/${usuarioId}/papel`)
+      .send({ papel: 'ADMIN' })
+      .expect(401);
+    await request(servidor)
+      .post(`/organizacoes/${orgId}/convites`)
+      .send({ email: 'pessoa@teste.com' })
+      .expect(401);
+    await request(servidor)
+      .patch(`/organizacoes/${orgId}/convite`)
+      .send({ aceitar: true })
       .expect(401);
   });
 
@@ -141,7 +156,89 @@ describe('Rotas autenticadas de organizações', () => {
     expect(service.listar).toHaveBeenCalledWith(
       TipoUsuario.ADMIN_SISTEMA,
       usuarioId,
+      undefined,
     );
+  });
+
+  it('encaminha o termo de busca da listagem', async () => {
+    await request(app.getHttpServer())
+      .get('/organizacoes')
+      .query({ busca: 'Conselho' })
+      .auth(token, { type: 'bearer' })
+      .expect(200);
+    expect(service.listar).toHaveBeenCalledWith(TipoUsuario.USUARIO, usuarioId, 'Conselho');
+  });
+
+  it('troca de papel valida o papel e usa o solicitante da sessão', async () => {
+    const rota = `/organizacoes/${orgId}/membros/${orgId}/papel`;
+    await request(app.getHttpServer())
+      .patch(rota)
+      .auth(token, { type: 'bearer' })
+      .send({ papel: 'DONO' })
+      .expect(400);
+    expect(service.alterarPapelMembro).not.toHaveBeenCalled();
+
+    await request(app.getHttpServer())
+      .patch(rota)
+      .auth(token, { type: 'bearer' })
+      .send({ papel: 'ADMIN', solicitante: orgId })
+      .expect(200);
+    expect(service.alterarPapelMembro).toHaveBeenCalledWith(
+      orgId,
+      orgId,
+      { papel: 'ADMIN' },
+      usuarioId,
+    );
+  });
+
+  it('convite valida o e-mail e é respondido sempre pela pessoa autenticada', async () => {
+    const servidor = app.getHttpServer();
+    await request(servidor)
+      .post(`/organizacoes/${orgId}/convites`)
+      .auth(token, { type: 'bearer' })
+      .send({ email: 'isto não é e-mail' })
+      .expect(400);
+    await request(servidor)
+      .post(`/organizacoes/${orgId}/convites`)
+      .auth(token, { type: 'bearer' })
+      .send({ email: 'pessoa@teste.com' })
+      .expect(201);
+    expect(service.convidarMembro).toHaveBeenCalledWith(orgId, { email: 'pessoa@teste.com' }, usuarioId);
+
+    await request(servidor)
+      .patch(`/organizacoes/${orgId}/convite`)
+      .auth(token, { type: 'bearer' })
+      .send({ aceitar: 'sim' })
+      .expect(400);
+    await request(servidor)
+      .patch(`/organizacoes/${orgId}/convite`)
+      .auth(token, { type: 'bearer' })
+      .send({ aceitar: true, usuario_id: orgId })
+      .expect(200);
+    expect(service.responderConvite).toHaveBeenCalledWith(orgId, usuarioId, { aceitar: true });
+  });
+
+  it('impede o administrador do sistema de trocar papéis, convidar e responder convites', async () => {
+    conta!.tipo = TipoUsuario.ADMIN_SISTEMA;
+    const servidor = app.getHttpServer();
+    await request(servidor)
+      .patch(`/organizacoes/${orgId}/membros/${usuarioId}/papel`)
+      .auth(token, { type: 'bearer' })
+      .send({ papel: 'ADMIN' })
+      .expect(403);
+    await request(servidor)
+      .post(`/organizacoes/${orgId}/convites`)
+      .auth(token, { type: 'bearer' })
+      .send({ email: 'pessoa@teste.com' })
+      .expect(403);
+    await request(servidor)
+      .patch(`/organizacoes/${orgId}/convite`)
+      .auth(token, { type: 'bearer' })
+      .send({ aceitar: true })
+      .expect(403);
+    expect(service.alterarPapelMembro).not.toHaveBeenCalled();
+    expect(service.convidarMembro).not.toHaveBeenCalled();
+    expect(service.responderConvite).not.toHaveBeenCalled();
   });
 
   it('criação ignora autor e status forjados no corpo', async () => {

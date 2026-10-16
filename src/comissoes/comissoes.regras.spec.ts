@@ -178,23 +178,101 @@ describe('Regras de comissões', () => {
     expect(comissoes.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it('lista somente comissões das organizações administradas', async () => {
+  it('administrador lista todas as comissões das organizações que administra', async () => {
     const { service, comissoes, organizacoes } = preparar();
     await service.listar(adminId);
-    expect(organizacoes.find).toHaveBeenCalledWith(
-      expect.objectContaining({
-        membros: {
-          $elemMatch: {
-            usuario_id: new Types.ObjectId(adminId),
-            papel: 'ADMIN',
-            status: 'APROVADO',
-          },
-        },
-      }),
-    );
-    expect(comissoes.find).toHaveBeenCalledWith({
-      organizacao_id: { $in: [new Types.ObjectId(organizacaoId)] },
+    expect(organizacoes.find).toHaveBeenCalledWith({
+      status: 'APROVADA',
+      membros: {
+        $elemMatch: { usuario_id: new Types.ObjectId(adminId), status: 'APROVADO' },
+      },
     });
+    expect(comissoes.find).toHaveBeenCalledWith({
+      $or: [
+        { organizacao_id: { $in: [new Types.ObjectId(organizacaoId)] } },
+        { organizacao_id: { $in: [] }, 'membros.usuario_id': new Types.ObjectId(adminId) },
+      ],
+    });
+  });
+
+  it('membro comum lista só as comissões de cuja equipe participa', async () => {
+    const { service, comissoes } = preparar();
+    await service.listar(membroId);
+    expect(comissoes.find).toHaveBeenCalledWith({
+      $or: [
+        { organizacao_id: { $in: [] } },
+        {
+          organizacao_id: { $in: [new Types.ObjectId(organizacaoId)] },
+          'membros.usuario_id': new Types.ObjectId(membroId),
+        },
+      ],
+    });
+  });
+
+  it('filtrando pela organização, o administrador vê todas e o membro só as suas', async () => {
+    const { service, comissoes } = preparar();
+    await service.listar(adminId, organizacaoId);
+    expect(comissoes.find).toHaveBeenLastCalledWith({
+      organizacao_id: new Types.ObjectId(organizacaoId),
+    });
+    await service.listar(membroId, organizacaoId);
+    expect(comissoes.find).toHaveBeenLastCalledWith({
+      organizacao_id: new Types.ObjectId(organizacaoId),
+      'membros.usuario_id': new Types.ObjectId(membroId),
+    });
+  });
+
+  it.each([
+    { statusOrganizacao: 'REVOGADA' },
+    { statusOrganizacao: 'PENDENTE' },
+    { usuarioAtivo: false },
+  ])('não mostra comissões sem vínculo válido: %j', async (opcoes) => {
+    const { service, comissoes } = preparar(opcoes);
+    await expect(service.listar(membroId, organizacaoId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(service.buscarPorId(comissaoId, membroId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    const externo = new Types.ObjectId().toString();
+    await expect(service.listar(externo, organizacaoId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(comissoes.find).not.toHaveBeenCalled();
+  });
+
+  it('integrante consulta a comissão, mas não a gerencia', async () => {
+    const { service, comissoes, comissao } = preparar();
+    await expect(service.buscarPorId(comissaoId, membroId)).resolves.toBe(comissao);
+    await expect(
+      service.atualizar(comissaoId, { nome: 'Outro' }, membroId),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.remover(comissaoId, membroId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(
+      service.adicionarMembro(comissaoId, { usuario_id: membroId }, membroId),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.atualizarMembro(comissaoId, membroId, PapelComissao.RESPONSAVEL, membroId),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.removerMembro(comissaoId, membroId, membroId),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.listarMembrosDisponiveis(organizacaoId, membroId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(comissoes.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(comissoes.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('membro aprovado fora da equipe não consulta a comissão', async () => {
+    const { service, comissao } = preparar();
+    comissao.membros = [];
+    await expect(service.buscarPorId(comissaoId, membroId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(service.buscarPorId(comissaoId, adminId)).resolves.toBe(comissao);
   });
 
   it('desativa sem apagar equipe e permite reativação', async () => {

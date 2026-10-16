@@ -29,7 +29,12 @@ import {
 
 import { CreateOrganizacaoDto } from './dto/create-organizacao.dto.js';
 import { UpdateOrganizacaoDto } from './dto/update-organizacao.dto.js';
-import { UpdateStatusMembroDto } from './dto/update-status-membro.dto.js';
+import {
+  ConvidarMembroDto,
+  ResponderConviteDto,
+  UpdatePapelMembroDto,
+  UpdateStatusMembroDto,
+} from './dto/update-status-membro.dto.js';
 
 @Injectable()
 export class OrganizacoesService {
@@ -74,22 +79,25 @@ export class OrganizacoesService {
     return organizacao;
   }
 
-  async listar(tipoUsuario: TipoUsuario, usuarioId: string) {
+  async listar(tipoUsuario: TipoUsuario, usuarioId: string, busca?: string) {
+    const termo = busca?.trim().slice(0, 100);
+    const porNome = termo ? { nome: new RegExp(this.escaparRegex(termo), 'i') } : {};
+
     if (tipoUsuario === TipoUsuario.ADMIN_SISTEMA) {
       return this.organizacaoModel
-        .find()
+        .find(porNome)
         .populate('criada_por', 'nome email tipo ativo')
         .sort({ criado_em: -1 })
         .exec();
     }
 
-    // Aprovadas para solicitar acesso, e as do próprio usuário em qualquer situação para acompanhar o cadastro.
     const organizacoes = await this.organizacaoModel
       .find({
         $or: [
           { status: StatusOrganizacao.APROVADA },
           { 'membros.usuario_id': new Types.ObjectId(usuarioId) },
         ],
+        ...porNome,
       })
       .select('nome descricao status membros')
       .sort({ criado_em: -1 })
@@ -170,7 +178,6 @@ export class OrganizacoesService {
       throw new NotFoundException('Organização não encontrada');
     }
 
-    // O filtro repete a condição para não excluir uma organização autorizada novamente no meio do caminho.
     const resultado = await this.organizacaoModel
       .deleteOne({ _id: id, status: StatusOrganizacao.REVOGADA })
       .exec();
@@ -204,11 +211,19 @@ export class OrganizacoesService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    const jaExiste = organizacao.membros.some(
-      (membro) => membro.usuario_id.toString() === usuarioId,
-    );
+    const existente = this.vinculoDe(organizacao, usuarioId);
 
-    if (jaExiste) {
+    if (existente?.status === StatusMembroOrganizacao.REJEITADO) {
+      return this.reabrirSolicitacao(id, usuarioId);
+    }
+
+    if (existente?.status === StatusMembroOrganizacao.CONVIDADO) {
+      throw new ConflictException(
+        'Você já recebeu um convite desta organização',
+      );
+    }
+
+    if (existente) {
       throw new ConflictException(
         'Usuário já pertence ou possui solicitação nesta organização',
       );
@@ -220,7 +235,6 @@ export class OrganizacoesService {
       status: StatusMembroOrganizacao.PENDENTE,
       solicitado_em: new Date(),
     };
-    // O filtro evita duplicação mesmo quando duas solicitações chegam juntas.
     const resultado = await this.organizacaoModel
       .updateOne(
         {
@@ -269,32 +283,29 @@ export class OrganizacoesService {
       throw new NotFoundException('Membro não encontrado nesta organização');
     }
 
-    if (membro.status !== StatusMembroOrganizacao.PENDENTE) {
+    const desfazRecusa =
+      membro.status === StatusMembroOrganizacao.REJEITADO &&
+      updateStatusDto.status === StatusMembroOrganizacao.APROVADO;
+
+    if (membro.status !== StatusMembroOrganizacao.PENDENTE && !desfazRecusa) {
       throw new ConflictException(
-        'Apenas solicitações pendentes podem ser analisadas',
+        'Esta solicitação já foi analisada',
       );
     }
 
+    const origem = membro.status;
     const resultado = await this.organizacaoModel
       .updateOne(
         {
           _id: id,
           status: StatusOrganizacao.APROVADA,
           $and: [
-            {
-              membros: {
-                $elemMatch: {
-                  usuario_id: new Types.ObjectId(solicitanteId),
-                  papel: PapelOrganizacao.ADMIN,
-                  status: StatusMembroOrganizacao.APROVADO,
-                },
-              },
-            },
+            this.administradorAprovado(solicitanteId),
             {
               membros: {
                 $elemMatch: {
                   usuario_id: new Types.ObjectId(usuarioId),
-                  status: StatusMembroOrganizacao.PENDENTE,
+                  status: origem,
                 },
               },
             },
@@ -315,7 +326,7 @@ export class OrganizacoesService {
           arrayFilters: [
             {
               'alvo.usuario_id': new Types.ObjectId(usuarioId),
-              'alvo.status': StatusMembroOrganizacao.PENDENTE,
+              'alvo.status': origem,
             },
           ],
         },
@@ -327,7 +338,7 @@ export class OrganizacoesService {
       );
     }
     return {
-      mensagem: 'Solicitação analisada',
+      mensagem: desfazRecusa ? 'Acesso aprovado' : 'Solicitação analisada',
       usuario_id: usuarioId,
       status: updateStatusDto.status,
     };
@@ -337,12 +348,21 @@ export class OrganizacoesService {
     this.validarId(usuarioId);
     const organizacao = await this.exigirAdministrador(id, solicitanteId);
     this.exigirOrganizacaoAprovada(organizacao);
-    const membro = organizacao.membros.find((item) => item.usuario_id.toString() === usuarioId);
+    const membro = this.vinculoDe(organizacao, usuarioId);
     if (membro?.papel === PapelOrganizacao.ADMIN) {
-      throw new ForbiddenException('Não é permitido remover administradores da organização');
+      throw new ForbiddenException(
+        'Não é possível remover um administrador. Torne a pessoa membro comum antes',
+      );
     }
-    if (membro && membro.status !== StatusMembroOrganizacao.APROVADO) {
-      throw new ConflictException('Apenas membros aprovados podem ser removidos');
+    const removiveis = [
+      StatusMembroOrganizacao.APROVADO,
+      StatusMembroOrganizacao.REJEITADO,
+      StatusMembroOrganizacao.CONVIDADO,
+    ];
+    if (membro && !removiveis.includes(membro.status)) {
+      throw new ConflictException(
+        'Aprove ou rejeite a solicitação antes de removê-la',
+      );
     }
     if (membro) {
       const resultado = await this.organizacaoModel.updateOne(
@@ -350,15 +370,11 @@ export class OrganizacoesService {
           _id: id,
           status: StatusOrganizacao.APROVADA,
           $and: [
-            { membros: { $elemMatch: {
-              usuario_id: new Types.ObjectId(solicitanteId),
-              papel: PapelOrganizacao.ADMIN,
-              status: StatusMembroOrganizacao.APROVADO,
-            } } },
+            this.administradorAprovado(solicitanteId),
             { membros: { $elemMatch: {
               usuario_id: new Types.ObjectId(usuarioId),
               papel: PapelOrganizacao.MEMBRO,
-              status: StatusMembroOrganizacao.APROVADO,
+              status: membro.status,
             } } },
           ],
         },
@@ -368,12 +384,254 @@ export class OrganizacoesService {
         throw new ConflictException('O vínculo ou as permissões mudaram. Atualize a lista');
       }
     }
-    // Revoga primeiro o acesso. Uma repetição pode concluir a limpeza se ela falhar.
     await this.comissaoModel.updateMany(
       { organizacao_id: new Types.ObjectId(id) },
       { $pull: { membros: { usuario_id: new Types.ObjectId(usuarioId) } } },
     ).exec();
-    return { mensagem: 'Acesso à organização removido com sucesso' };
+    const mensagens: Partial<Record<StatusMembroOrganizacao, string>> = {
+      [StatusMembroOrganizacao.REJEITADO]: 'Solicitação excluída',
+      [StatusMembroOrganizacao.CONVIDADO]: 'Convite cancelado',
+    };
+    return {
+      mensagem:
+        (membro && mensagens[membro.status]) ?? 'Acesso à organização removido com sucesso',
+    };
+  }
+
+  async alterarPapelMembro(
+    id: string,
+    usuarioId: string,
+    updatePapelDto: UpdatePapelMembroDto,
+    solicitanteId: string,
+  ) {
+    this.validarId(usuarioId);
+    const organizacao = await this.exigirAdministrador(id, solicitanteId);
+    this.exigirOrganizacaoAprovada(organizacao);
+
+    const membro = this.vinculoDe(organizacao, usuarioId);
+    if (!membro) {
+      throw new NotFoundException('Membro não encontrado nesta organização');
+    }
+    if (membro.status !== StatusMembroOrganizacao.APROVADO) {
+      throw new ConflictException('Apenas membros aprovados podem mudar de papel');
+    }
+    if (membro.papel === updatePapelDto.papel) {
+      throw new ConflictException('O membro já possui esse papel');
+    }
+
+    const alvo = new Types.ObjectId(usuarioId);
+    const rebaixando = updatePapelDto.papel === PapelOrganizacao.MEMBRO;
+    const outrosAdministradores = organizacao.membros.filter(
+      (item) =>
+        item.papel === PapelOrganizacao.ADMIN &&
+        item.status === StatusMembroOrganizacao.APROVADO &&
+        item.usuario_id.toString() !== usuarioId,
+    ).length;
+    if (rebaixando && outrosAdministradores === 0) {
+      throw new ConflictException(
+        'A organização precisa de pelo menos um administrador. Promova outro membro antes',
+      );
+    }
+
+    const condicoes: Record<string, unknown>[] = [
+      this.administradorAprovado(solicitanteId),
+      { membros: { $elemMatch: {
+        usuario_id: alvo,
+        papel: membro.papel,
+        status: StatusMembroOrganizacao.APROVADO,
+      } } },
+    ];
+    if (rebaixando) {
+      condicoes.push({ membros: { $elemMatch: {
+        usuario_id: { $ne: alvo },
+        papel: PapelOrganizacao.ADMIN,
+        status: StatusMembroOrganizacao.APROVADO,
+      } } });
+    }
+
+    const resultado = await this.organizacaoModel.updateOne(
+      { _id: id, status: StatusOrganizacao.APROVADA, $and: condicoes },
+      { $set: { 'membros.$[alvo].papel': updatePapelDto.papel } },
+      { arrayFilters: [{ 'alvo.usuario_id': alvo, 'alvo.status': StatusMembroOrganizacao.APROVADO }] },
+    ).exec();
+    if (resultado.modifiedCount !== 1) {
+      throw new ConflictException('Os papéis ou as permissões mudaram. Atualize a lista');
+    }
+    return {
+      mensagem: rebaixando
+        ? 'O administrador passou a ser membro'
+        : 'Membro promovido a administrador',
+      usuario_id: usuarioId,
+      papel: updatePapelDto.papel,
+    };
+  }
+
+  async convidarMembro(id: string, convidarDto: ConvidarMembroDto, solicitanteId: string) {
+    const organizacao = await this.exigirAdministrador(id, solicitanteId);
+    this.exigirOrganizacaoAprovada(organizacao);
+
+    const email = convidarDto.email.toLowerCase().trim();
+    const convidado = await this.usuarioModel.findOne({ email, ativo: true }).exec();
+    if (!convidado || convidado.tipo === TipoUsuario.ADMIN_SISTEMA) {
+      throw new NotFoundException('Nenhum usuário ativo encontrado com este e-mail');
+    }
+
+    const alvo = convidado._id;
+    const existente = this.vinculoDe(organizacao, alvo.toString());
+    if (existente?.status === StatusMembroOrganizacao.APROVADO) {
+      throw new ConflictException('Esta pessoa já é membro da organização');
+    }
+    if (existente?.status === StatusMembroOrganizacao.PENDENTE) {
+      throw new ConflictException('Esta pessoa já solicitou acesso');
+    }
+    if (existente?.status === StatusMembroOrganizacao.CONVIDADO) {
+      throw new ConflictException('Esta pessoa já foi convidada');
+    }
+
+    const convidadoEm = new Date();
+    const resultado = existente
+      ? await this.organizacaoModel.updateOne(
+          {
+            _id: id,
+            status: StatusOrganizacao.APROVADA,
+            $and: [
+              this.administradorAprovado(solicitanteId),
+              { membros: { $elemMatch: { usuario_id: alvo, status: StatusMembroOrganizacao.REJEITADO } } },
+            ],
+          },
+          {
+            $set: {
+              'membros.$[alvo].status': StatusMembroOrganizacao.CONVIDADO,
+              'membros.$[alvo].solicitado_em': convidadoEm,
+            },
+            $unset: { 'membros.$[alvo].aprovado_em': '' },
+          },
+          { arrayFilters: [{ 'alvo.usuario_id': alvo, 'alvo.status': StatusMembroOrganizacao.REJEITADO }] },
+        ).exec()
+      : await this.organizacaoModel.updateOne(
+          {
+            _id: id,
+            status: StatusOrganizacao.APROVADA,
+            'membros.usuario_id': { $ne: alvo },
+            $and: [this.administradorAprovado(solicitanteId)],
+          },
+          {
+            $push: {
+              membros: {
+                usuario_id: alvo,
+                papel: PapelOrganizacao.MEMBRO,
+                status: StatusMembroOrganizacao.CONVIDADO,
+                solicitado_em: convidadoEm,
+              },
+            },
+          },
+        ).exec();
+    if (resultado.modifiedCount !== 1) {
+      throw new ConflictException('O vínculo ou as permissões mudaram. Atualize a lista');
+    }
+    return {
+      mensagem: 'Convite enviado',
+      usuario: { _id: alvo, nome: convidado.nome, email: convidado.email },
+    };
+  }
+
+  async responderConvite(id: string, usuarioId: string, responderDto: ResponderConviteDto) {
+    this.validarId(id);
+    this.validarId(usuarioId);
+
+    const organizacao = await this.organizacaoModel.findById(id).exec();
+    if (!organizacao) {
+      throw new NotFoundException('Organização não encontrada');
+    }
+    if (this.vinculoDe(organizacao, usuarioId)?.status !== StatusMembroOrganizacao.CONVIDADO) {
+      throw new NotFoundException('Convite não encontrado');
+    }
+
+    const alvo = new Types.ObjectId(usuarioId);
+    const convite = {
+      membros: { $elemMatch: { usuario_id: alvo, status: StatusMembroOrganizacao.CONVIDADO } },
+    };
+
+    if (!responderDto.aceitar) {
+      const resultado = await this.organizacaoModel.updateOne(
+        { _id: id, ...convite },
+        { $pull: { membros: { usuario_id: alvo, status: StatusMembroOrganizacao.CONVIDADO } } },
+      ).exec();
+      if (resultado.modifiedCount !== 1) {
+        throw new ConflictException('Este convite não está mais disponível');
+      }
+      return { mensagem: 'Convite recusado', aceito: false };
+    }
+
+    this.exigirOrganizacaoAprovada(organizacao);
+    const resultado = await this.organizacaoModel.updateOne(
+      { _id: id, status: StatusOrganizacao.APROVADA, ...convite },
+      {
+        $set: {
+          'membros.$[alvo].status': StatusMembroOrganizacao.APROVADO,
+          'membros.$[alvo].aprovado_em': new Date(),
+        },
+      },
+      { arrayFilters: [{ 'alvo.usuario_id': alvo, 'alvo.status': StatusMembroOrganizacao.CONVIDADO }] },
+    ).exec();
+    if (resultado.modifiedCount !== 1) {
+      throw new ConflictException('Este convite não está mais disponível');
+    }
+    return { mensagem: 'Convite aceito', aceito: true };
+  }
+
+  private async reabrirSolicitacao(id: string, usuarioId: string) {
+    const alvo = new Types.ObjectId(usuarioId);
+    const solicitadoEm = new Date();
+    const resultado = await this.organizacaoModel
+      .updateOne(
+        {
+          _id: id,
+          status: StatusOrganizacao.APROVADA,
+          membros: { $elemMatch: { usuario_id: alvo, status: StatusMembroOrganizacao.REJEITADO } },
+        },
+        {
+          $set: {
+            'membros.$[alvo].status': StatusMembroOrganizacao.PENDENTE,
+            'membros.$[alvo].solicitado_em': solicitadoEm,
+          },
+          $unset: { 'membros.$[alvo].aprovado_em': '' },
+        },
+        { arrayFilters: [{ 'alvo.usuario_id': alvo, 'alvo.status': StatusMembroOrganizacao.REJEITADO }] },
+      )
+      .exec();
+    if (resultado.modifiedCount !== 1) {
+      throw new ConflictException('Solicitação já registrada ou organização indisponível');
+    }
+    return {
+      mensagem: 'Solicitação enviada novamente para análise',
+      membro: {
+        usuario_id: alvo,
+        papel: PapelOrganizacao.MEMBRO,
+        status: StatusMembroOrganizacao.PENDENTE,
+        solicitado_em: solicitadoEm,
+      },
+    };
+  }
+
+  private vinculoDe(organizacao: Organizacao, usuarioId: string) {
+    return organizacao.membros.find((membro) => membro.usuario_id.toString() === usuarioId);
+  }
+
+  private administradorAprovado(solicitanteId: string) {
+    return {
+      membros: {
+        $elemMatch: {
+          usuario_id: new Types.ObjectId(solicitanteId),
+          papel: PapelOrganizacao.ADMIN,
+          status: StatusMembroOrganizacao.APROVADO,
+        },
+      },
+    };
+  }
+
+  private escaparRegex(texto: string) {
+    return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   private async exigirAdministrador(id: string, usuarioId: string) {
@@ -397,16 +655,13 @@ export class OrganizacoesService {
   private exigirOrganizacaoAprovada(organizacao: Organizacao) {
     if (organizacao.status !== StatusOrganizacao.APROVADA) {
       throw new ForbiddenException(
-        'A organização não está aprovada para receber ou analisar solicitações',
+        'Esta organização não está aprovada',
       );
     }
   }
 
   private async exigirNomeDisponivel(nome: string, ignorarId?: string) {
-    const nomeExato = new RegExp(
-      `^${nome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
-      'i',
-    );
+    const nomeExato = new RegExp(`^${this.escaparRegex(nome)}$`, 'i');
     const filtro: Record<string, unknown> = { nome: nomeExato };
 
     if (ignorarId) {

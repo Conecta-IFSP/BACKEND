@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -14,7 +15,12 @@ import { OrganizacoesService } from './organizacoes.service.js';
 
 import { CreateOrganizacaoDto } from './dto/create-organizacao.dto.js';
 import { UpdateOrganizacaoDto } from './dto/update-organizacao.dto.js';
-import { UpdateStatusMembroDto } from './dto/update-status-membro.dto.js';
+import {
+  ConvidarMembroDto,
+  ResponderConviteDto,
+  UpdatePapelMembroDto,
+  UpdateStatusMembroDto,
+} from './dto/update-status-membro.dto.js';
 import {
   JwtAuthGuard,
   type RequisicaoAutenticada,
@@ -40,10 +46,14 @@ export class OrganizacoesController {
   }
 
   @Get()
-  listar(@Req() requisicao: RequisicaoAutenticada) {
+  listar(
+    @Req() requisicao: RequisicaoAutenticada,
+    @Query('busca') busca?: string,
+  ) {
     return this.organizacoesService.listar(
       requisicao.usuario.tipo,
       requisicao.usuario.sub,
+      busca,
     );
   }
 
@@ -103,5 +113,41 @@ export class OrganizacoesController {
       updateStatusDto,
       requisicao.usuario.sub,
     );
+  }
+
+  @Patch(':id/membros/:usuarioId/papel')
+  @UseGuards(UsuarioComumGuard)
+  alterarPapelMembro(
+    @Param('id') id: string,
+    @Param('usuarioId') usuarioId: string,
+    @Body() updatePapelDto: UpdatePapelMembroDto,
+    @Req() requisicao: RequisicaoAutenticada,
+  ) {
+    return this.organizacoesService.alterarPapelMembro(
+      id,
+      usuarioId,
+      updatePapelDto,
+      requisicao.usuario.sub,
+    );
+  }
+
+  @Post(':id/convites')
+  @UseGuards(UsuarioComumGuard)
+  convidarMembro(
+    @Param('id') id: string,
+    @Body() convidarDto: ConvidarMembroDto,
+    @Req() requisicao: RequisicaoAutenticada,
+  ) {
+    return this.organizacoesService.convidarMembro(id, convidarDto, requisicao.usuario.sub);
+  }
+
+  @Patch(':id/convite')
+  @UseGuards(UsuarioComumGuard)
+  responderConvite(
+    @Param('id') id: string,
+    @Body() responderDto: ResponderConviteDto,
+    @Req() requisicao: RequisicaoAutenticada,
+  ) {
+    return this.organizacoesService.responderConvite(id, requisicao.usuario.sub, responderDto);
   }
 }

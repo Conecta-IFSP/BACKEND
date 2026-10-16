@@ -42,7 +42,6 @@ export class Usuario {
   })
   senha_hash: string;
 
-  // Compatibilidade com contas anteriores à padronização dos campos.
   @Prop({ select: false })
   senhaHash?: string;
 
@@ -72,7 +71,6 @@ export class Usuario {
   @Prop({ select: false })
   verificacao_email_expira_em?: Date;
 
-  // Contas antigas não possuem este campo e devem continuar acessíveis.
   @Prop({ default: true })
   email_verificado: boolean;
 

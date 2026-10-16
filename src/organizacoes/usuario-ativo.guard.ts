@@ -12,7 +12,6 @@ import {
   UsuarioDocument,
 } from '../usuarios/schemas/usuario.schema.js';
 
-/** Revalida a conta para que um token antigo não mantenha permissões revogadas. */
 @Injectable()
 export class UsuarioAtivoGuard implements CanActivate {
   constructor(

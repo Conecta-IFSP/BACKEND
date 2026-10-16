@@ -9,11 +9,6 @@ import { Comissao, ComissaoSchema } from '../comissoes/schemas/comissao.schema.j
 import { SistemaController } from './sistema.controller.js';
 import { SistemaService } from './sistema.service.js';
 
-/**
- * O setup inicial (criação do administrador do sistema) já é feito em
- * UsuariosService.onApplicationBootstrap(), usando ROOT_USER_NAME/EMAIL/PASSWORD.
- * Este módulo cuida só de status, relatórios, reinício de subsistemas e reset.
- */
 @Module({
   imports: [
     AuthModule,

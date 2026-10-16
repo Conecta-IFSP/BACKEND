@@ -16,7 +16,6 @@ export class AdminSistemaGuard implements CanActivate {
   }
 }
 
-/** O administrador do sistema só gerencia a plataforma: não cria nem participa de organizações e comissões. */
 @Injectable()
 export class UsuarioComumGuard implements CanActivate {
   canActivate(context: ExecutionContext) {

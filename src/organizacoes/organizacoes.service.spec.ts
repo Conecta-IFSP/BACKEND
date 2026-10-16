@@ -41,6 +41,7 @@ describe('Permissões e solicitações de organizações', () => {
     exists: ReturnType<typeof vi.fn>;
   };
   let comissoes: { deleteMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
+  let usuarios: { findById: ReturnType<typeof vi.fn>; findOne: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     organizacao = {
@@ -65,14 +66,28 @@ describe('Permissões e solicitações de organizações', () => {
       deleteMany: vi.fn(() => consulta({ deletedCount: 2 })),
       updateMany: vi.fn(() => consulta({ modifiedCount: 2 })),
     };
+    usuarios = {
+      findById: vi.fn(() => consulta({ ativo: true })),
+      findOne: vi.fn(() =>
+        consulta({
+          _id: new Types.ObjectId(usuario),
+          nome: 'Pessoa convidada',
+          email: 'convidada@teste.com',
+          tipo: TipoUsuario.USUARIO,
+          ativo: true,
+        }),
+      ),
+    };
     service = new OrganizacoesService(
       model as unknown as Model<OrganizacaoDocument>,
-      {
-        findById: vi.fn(() => consulta({ ativo: true })),
-      } as unknown as Model<UsuarioDocument>,
+      usuarios as unknown as Model<UsuarioDocument>,
       comissoes as unknown as Model<ComissaoDocument>,
     );
   });
+
+  function vincular(status: StatusMembroOrganizacao, papel = PapelOrganizacao.MEMBRO) {
+    organizacao.membros.push({ usuario_id: new Types.ObjectId(usuario), papel, status });
+  }
 
   it('remove vínculo e limpa somente comissões da organização escolhida', async () => {
     organizacao.membros.push({ usuario_id: new Types.ObjectId(usuario), papel: PapelOrganizacao.MEMBRO, status: StatusMembroOrganizacao.APROVADO });
@@ -94,10 +109,28 @@ describe('Permissões e solicitações de organizações', () => {
     expect(comissoes.updateMany).not.toHaveBeenCalled();
   });
 
-  it.each([StatusMembroOrganizacao.PENDENTE, StatusMembroOrganizacao.REJEITADO])('não remove vínculo %s', async (status) => {
-    organizacao.membros.push({ usuario_id: new Types.ObjectId(usuario), papel: PapelOrganizacao.MEMBRO, status });
+  it('não remove solicitação pendente: ela deve ser aprovada ou recusada', async () => {
+    vincular(StatusMembroOrganizacao.PENDENTE);
     await expect(service.removerMembro(orgId, usuario, admin)).rejects.toBeInstanceOf(ConflictException);
     expect(comissoes.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [StatusMembroOrganizacao.REJEITADO, 'Solicitação excluída'],
+    [StatusMembroOrganizacao.CONVIDADO, 'Convite cancelado'],
+  ])('remove o vínculo %s conferindo a situação na gravação', async (status, mensagem) => {
+    vincular(status);
+    await expect(service.removerMembro(orgId, usuario, admin)).resolves.toEqual({ mensagem });
+    const [filtro] = model.updateOne.mock.calls[0];
+    expect(filtro.$and).toContainEqual({
+      membros: {
+        $elemMatch: {
+          usuario_id: new Types.ObjectId(usuario),
+          papel: PapelOrganizacao.MEMBRO,
+          status,
+        },
+      },
+    });
   });
 
   it('bloqueia remoção em organização revogada', async () => {
@@ -218,11 +251,29 @@ describe('Permissões e solicitações de organizações', () => {
 
     await service.listar(TipoUsuario.ADMIN_SISTEMA, admin);
 
-    expect(model.find).toHaveBeenCalledWith();
+    expect(model.find).toHaveBeenCalledWith({});
     expect(query.populate).toHaveBeenCalledWith(
       'criada_por',
       'nome email tipo ativo',
     );
+  });
+
+  it('busca pelo nome escapando caracteres especiais e sem distinguir maiúsculas', async () => {
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      sort: vi.fn().mockReturnThis(),
+      lean: vi.fn().mockReturnThis(),
+      exec: vi.fn().mockResolvedValue([]),
+    };
+    model.find.mockReturnValue(query);
+
+    await service.listar(TipoUsuario.USUARIO, usuario, '  Conselho (A).  ');
+
+    const [filtro] = model.find.mock.calls[0];
+    expect(filtro.$or).toHaveLength(2);
+    expect(filtro.nome).toEqual(/Conselho \(A\)\./i);
+    expect(filtro.nome.test('conselho (a). municipal')).toBe(true);
+    expect(filtro.nome.test('Conselho AA')).toBe(false);
   });
 
   it('recusa nome de organização repetido sem diferenciar maiúsculas', async () => {
@@ -268,20 +319,31 @@ describe('Permissões e solicitações de organizações', () => {
     expect(model.updateOne).toHaveBeenCalledTimes(2);
   });
 
-  it.each(Object.values(StatusMembroOrganizacao))(
-    'não repete vínculo com situação %s',
-    async (status) => {
-      organizacao.membros.push({
-        usuario_id: new Types.ObjectId(usuario),
-        papel: PapelOrganizacao.MEMBRO,
-        status,
-      });
-      await expect(
-        service.adicionarMembro(orgId, usuario),
-      ).rejects.toBeInstanceOf(ConflictException);
-      expect(model.updateOne).not.toHaveBeenCalled();
-    },
-  );
+  it.each(
+    Object.values(StatusMembroOrganizacao).filter(
+      (status) => status !== StatusMembroOrganizacao.REJEITADO,
+    ),
+  )('não repete vínculo com situação %s', async (status) => {
+    vincular(status);
+    await expect(
+      service.adicionarMembro(orgId, usuario),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(model.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('reabre como pendente o pedido de quem foi recusado', async () => {
+    vincular(StatusMembroOrganizacao.REJEITADO);
+    const resposta = await service.adicionarMembro(orgId, usuario);
+    expect(resposta.membro.status).toBe(StatusMembroOrganizacao.PENDENTE);
+    const [filtro, alteracao, opcoes] = model.updateOne.mock.calls[0];
+    expect(filtro.membros.$elemMatch.status).toBe(StatusMembroOrganizacao.REJEITADO);
+    expect(alteracao.$set['membros.$[alvo].status']).toBe(StatusMembroOrganizacao.PENDENTE);
+    expect(alteracao.$unset).toHaveProperty('membros.$[alvo].aprovado_em');
+    expect(opcoes.arrayFilters[0]['alvo.status']).toBe(StatusMembroOrganizacao.REJEITADO);
+
+    model.updateOne.mockReturnValue(consulta({ modifiedCount: 0 }));
+    await expect(service.adicionarMembro(orgId, usuario)).rejects.toBeInstanceOf(ConflictException);
+  });
 
   it.each([StatusOrganizacao.PENDENTE, StatusOrganizacao.REVOGADA])(
     'bloqueia solicitação e decisão em organização %s',
@@ -361,17 +423,36 @@ describe('Permissões e solicitações de organizações', () => {
     expect(alteracao.$set['membros.$[alvo].status']).toBe(status);
   });
 
-  it('não reabre rejeição nem modifica o administrador aprovado', async () => {
-    organizacao.membros.push({
-      usuario_id: new Types.ObjectId(usuario),
-      papel: PapelOrganizacao.MEMBRO,
-      status: StatusMembroOrganizacao.REJEITADO,
-    });
+  it('desfaz a recusa aprovando, conferindo na gravação que ela continua recusada', async () => {
+    vincular(StatusMembroOrganizacao.REJEITADO);
     await expect(
       service.atualizarStatusMembro(
         orgId,
         usuario,
         { status: StatusMembroOrganizacao.APROVADO },
+        admin,
+      ),
+    ).resolves.toMatchObject({ mensagem: 'Acesso aprovado' });
+    const [filtro, alteracao, opcoes] = model.updateOne.mock.calls[0];
+    expect(filtro.$and).toContainEqual({
+      membros: {
+        $elemMatch: {
+          usuario_id: new Types.ObjectId(usuario),
+          status: StatusMembroOrganizacao.REJEITADO,
+        },
+      },
+    });
+    expect(alteracao.$set['membros.$[alvo].status']).toBe(StatusMembroOrganizacao.APROVADO);
+    expect(opcoes.arrayFilters[0]['alvo.status']).toBe(StatusMembroOrganizacao.REJEITADO);
+  });
+
+  it('não recusa de novo uma recusa nem modifica o administrador aprovado', async () => {
+    vincular(StatusMembroOrganizacao.REJEITADO);
+    await expect(
+      service.atualizarStatusMembro(
+        orgId,
+        usuario,
+        { status: StatusMembroOrganizacao.REJEITADO },
         admin,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -401,5 +482,204 @@ describe('Permissões e solicitações de organizações', () => {
         admin,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  describe('troca de administrador', () => {
+    it('promove um membro aprovado a administrador', async () => {
+      vincular(StatusMembroOrganizacao.APROVADO);
+      await expect(
+        service.alterarPapelMembro(orgId, usuario, { papel: PapelOrganizacao.ADMIN }, admin),
+      ).resolves.toMatchObject({ papel: PapelOrganizacao.ADMIN });
+      const [filtro, alteracao, opcoes] = model.updateOne.mock.calls[0];
+      expect(filtro.$and).toHaveLength(2);
+      expect(filtro.$and).toContainEqual({
+        membros: {
+          $elemMatch: {
+            usuario_id: new Types.ObjectId(usuario),
+            papel: PapelOrganizacao.MEMBRO,
+            status: StatusMembroOrganizacao.APROVADO,
+          },
+        },
+      });
+      expect(alteracao).toEqual({ $set: { 'membros.$[alvo].papel': PapelOrganizacao.ADMIN } });
+      expect(opcoes.arrayFilters[0]['alvo.usuario_id']).toEqual(new Types.ObjectId(usuario));
+    });
+
+    it('devolve um administrador ao papel de membro quando existe outro administrador', async () => {
+      vincular(StatusMembroOrganizacao.APROVADO, PapelOrganizacao.ADMIN);
+      await service.alterarPapelMembro(orgId, usuario, { papel: PapelOrganizacao.MEMBRO }, admin);
+      const [filtro] = model.updateOne.mock.calls[0];
+      expect(filtro.$and).toContainEqual({
+        membros: {
+          $elemMatch: {
+            usuario_id: { $ne: new Types.ObjectId(usuario) },
+            papel: PapelOrganizacao.ADMIN,
+            status: StatusMembroOrganizacao.APROVADO,
+          },
+        },
+      });
+    });
+
+    it('permite ao administrador deixar o papel quando há outro, completando a transferência', async () => {
+      vincular(StatusMembroOrganizacao.APROVADO, PapelOrganizacao.ADMIN);
+      await expect(
+        service.alterarPapelMembro(orgId, admin, { papel: PapelOrganizacao.MEMBRO }, admin),
+      ).resolves.toMatchObject({ papel: PapelOrganizacao.MEMBRO });
+    });
+
+    it('impede que a organização fique sem administrador', async () => {
+      await expect(
+        service.alterarPapelMembro(orgId, admin, { papel: PapelOrganizacao.MEMBRO }, admin),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      StatusMembroOrganizacao.PENDENTE,
+      StatusMembroOrganizacao.REJEITADO,
+      StatusMembroOrganizacao.CONVIDADO,
+    ])('não muda o papel de vínculo %s', async (status) => {
+      vincular(status);
+      await expect(
+        service.alterarPapelMembro(orgId, usuario, { papel: PapelOrganizacao.ADMIN }, admin),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('recusa papel repetido, membro inexistente e solicitante que não administra', async () => {
+      vincular(StatusMembroOrganizacao.APROVADO);
+      await expect(
+        service.alterarPapelMembro(orgId, usuario, { papel: PapelOrganizacao.MEMBRO }, admin),
+      ).rejects.toBeInstanceOf(ConflictException);
+      await expect(
+        service.alterarPapelMembro(orgId, new Types.ObjectId().toString(), { papel: PapelOrganizacao.ADMIN }, admin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.alterarPapelMembro(orgId, admin, { papel: PapelOrganizacao.MEMBRO }, usuario),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('detecta troca simultânea que deixaria a organização sem administrador', async () => {
+      vincular(StatusMembroOrganizacao.APROVADO, PapelOrganizacao.ADMIN);
+      model.updateOne.mockReturnValue(consulta({ modifiedCount: 0 }));
+      await expect(
+        service.alterarPapelMembro(orgId, usuario, { papel: PapelOrganizacao.MEMBRO }, admin),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('convite', () => {
+    it('convida um usuário ativo sem vínculo, identificado pelo e-mail', async () => {
+      await expect(
+        service.convidarMembro(orgId, { email: '  Convidada@Teste.com ' }, admin),
+      ).resolves.toMatchObject({ mensagem: 'Convite enviado', usuario: { nome: 'Pessoa convidada' } });
+      expect(usuarios.findOne).toHaveBeenCalledWith({ email: 'convidada@teste.com', ativo: true });
+      const [filtro, alteracao] = model.updateOne.mock.calls[0];
+      expect(filtro['membros.usuario_id']).toEqual({ $ne: new Types.ObjectId(usuario) });
+      expect(alteracao.$push.membros).toMatchObject({
+        usuario_id: new Types.ObjectId(usuario),
+        papel: PapelOrganizacao.MEMBRO,
+        status: StatusMembroOrganizacao.CONVIDADO,
+      });
+    });
+
+    it('transforma uma recusa anterior em convite', async () => {
+      vincular(StatusMembroOrganizacao.REJEITADO);
+      await service.convidarMembro(orgId, { email: 'convidada@teste.com' }, admin);
+      const [filtro, alteracao, opcoes] = model.updateOne.mock.calls[0];
+      expect(filtro.$and).toHaveLength(2);
+      expect(alteracao.$set['membros.$[alvo].status']).toBe(StatusMembroOrganizacao.CONVIDADO);
+      expect(opcoes.arrayFilters[0]['alvo.status']).toBe(StatusMembroOrganizacao.REJEITADO);
+    });
+
+    it.each([
+      StatusMembroOrganizacao.APROVADO,
+      StatusMembroOrganizacao.PENDENTE,
+      StatusMembroOrganizacao.CONVIDADO,
+    ])('não convida quem já tem vínculo %s', async (status) => {
+      vincular(status);
+      await expect(
+        service.convidarMembro(orgId, { email: 'convidada@teste.com' }, admin),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('não convida e-mail sem conta ativa nem o administrador do sistema', async () => {
+      usuarios.findOne.mockReturnValueOnce(consulta(null));
+      await expect(
+        service.convidarMembro(orgId, { email: 'ninguem@teste.com' }, admin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      usuarios.findOne.mockReturnValueOnce(
+        consulta({ _id: new Types.ObjectId(usuario), tipo: TipoUsuario.ADMIN_SISTEMA, ativo: true }),
+      );
+      await expect(
+        service.convidarMembro(orgId, { email: 'admin@teste.com' }, admin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('só o administrador da organização aprovada convida', async () => {
+      await expect(
+        service.convidarMembro(orgId, { email: 'convidada@teste.com' }, usuario),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      organizacao.status = StatusOrganizacao.PENDENTE;
+      await expect(
+        service.convidarMembro(orgId, { email: 'convidada@teste.com' }, admin),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(usuarios.findOne).not.toHaveBeenCalled();
+    });
+
+    it('aceitar torna a pessoa membro aprovado', async () => {
+      vincular(StatusMembroOrganizacao.CONVIDADO);
+      await expect(service.responderConvite(orgId, usuario, { aceitar: true })).resolves.toEqual({
+        mensagem: 'Convite aceito',
+        aceito: true,
+      });
+      const [filtro, alteracao, opcoes] = model.updateOne.mock.calls[0];
+      expect(filtro.status).toBe(StatusOrganizacao.APROVADA);
+      expect(alteracao.$set['membros.$[alvo].status']).toBe(StatusMembroOrganizacao.APROVADO);
+      expect(opcoes.arrayFilters[0]['alvo.status']).toBe(StatusMembroOrganizacao.CONVIDADO);
+    });
+
+    it('recusar apaga o convite, mesmo com a organização revogada', async () => {
+      vincular(StatusMembroOrganizacao.CONVIDADO);
+      organizacao.status = StatusOrganizacao.REVOGADA;
+      await expect(service.responderConvite(orgId, usuario, { aceitar: false })).resolves.toEqual({
+        mensagem: 'Convite recusado',
+        aceito: false,
+      });
+      expect(model.updateOne).toHaveBeenCalledWith(
+        expect.not.objectContaining({ status: StatusOrganizacao.APROVADA }),
+        {
+          $pull: {
+            membros: {
+              usuario_id: new Types.ObjectId(usuario),
+              status: StatusMembroOrganizacao.CONVIDADO,
+            },
+          },
+        },
+      );
+    });
+
+    it('não aceita convite em organização revogada nem responde sem convite', async () => {
+      vincular(StatusMembroOrganizacao.CONVIDADO);
+      organizacao.status = StatusOrganizacao.REVOGADA;
+      await expect(
+        service.responderConvite(orgId, usuario, { aceitar: true }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.responderConvite(orgId, admin, { aceitar: true }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('detecta convite alterado durante a resposta', async () => {
+      vincular(StatusMembroOrganizacao.CONVIDADO);
+      model.updateOne.mockReturnValue(consulta({ modifiedCount: 0 }));
+      await expect(
+        service.responderConvite(orgId, usuario, { aceitar: true }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
   });
 });

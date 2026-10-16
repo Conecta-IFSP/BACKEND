@@ -14,7 +14,6 @@ import {
 } from '../organizacoes/schemas/organizacao.schema.js';
 import { Comissao, PapelComissao, type ComissaoDocument } from '../comissoes/schemas/comissao.schema.js';
 
-/** Senha padrão usada só nos usuários de teste criados pelo setup. */
 const SENHA_USUARIO_TESTE = 'Teste@123';
 
 @Injectable()
@@ -25,12 +24,6 @@ export class SistemaService {
     @InjectModel(Comissao.name) private readonly comissoes: Model<ComissaoDocument>,
   ) {}
 
-  /**
-   * Status do servidor onde o backend roda: memória e CPU vêm do módulo nativo
-   * `os` do Node, sem dependência externa. Hoje é o seu próprio computador em
-   * desenvolvimento; em produção (deploy real) passa a refletir o servidor de
-   * fato, o que já deixa a base pronta para monitoramento futuro.
-   */
   async status() {
     const memoriaTotal = os.totalmem();
     const memoriaLivre = os.freemem();
@@ -67,7 +60,6 @@ export class SistemaService {
     };
   }
 
-  /** Números simples para o painel de relatórios do administrador. */
   async relatorios() {
     const [usuariosTotal, usuariosAtivos, orgTotal, orgPendentes, orgAprovadas, comissoesTotal, comissoesAtivas] =
       await Promise.all([
@@ -87,10 +79,6 @@ export class SistemaService {
     };
   }
 
-  /**
-   * Apaga usuários, organizações e comissões, preservando o(s) administrador(es)
-   * do sistema — sem isso ninguém ficaria para aprovar organizações depois do reset.
-   */
   async reset() {
     await Promise.all([
       this.usuarios.deleteMany({ tipo: { $ne: TipoUsuario.ADMIN_SISTEMA } }).exec(),
@@ -101,11 +89,6 @@ export class SistemaService {
     return { status: 'sistema_resetado', resetado_em: new Date() };
   }
 
-  /**
-   * Cria usuários de teste cobrindo os casos de uso principais:
-   * um sem vínculo, um só em organização e um em organização + comissão.
-   * Não mexe no administrador do sistema.
-   */
   async popularDadosDeTeste() {
     const senhaHash = await bcrypt.hash(SENHA_USUARIO_TESTE, 10);
 
@@ -129,7 +112,7 @@ export class SistemaService {
 
     const organizacao = await this.organizacoes.create({
       nome: 'Organização de Teste',
-      descricao: 'Criada automaticamente pelo setup de dados de teste.',
+      descricao: 'Criada para testes.',
       criada_por: membroOrganizacao._id,
       status: StatusOrganizacao.APROVADA,
       membros: [
@@ -152,7 +135,7 @@ export class SistemaService {
 
     await this.comissoes.create({
       nome: 'Comissão de Teste',
-      descricao: 'Criada automaticamente pelo setup de dados de teste.',
+      descricao: 'Criada para testes.',
       organizacao_id: organizacao._id,
       membros: [
         {

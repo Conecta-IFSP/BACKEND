@@ -59,7 +59,6 @@ export class AuthService {
       throw new UnauthorizedException('Confirme seu e-mail antes de entrar');
     }
 
-    // O campo atual tem precedência, inclusive após redefinir a senha.
     const hash = usuario.senha_hash ?? usuario.senhaHash;
     if (typeof hash !== 'string' || !hash) {
       throw new UnauthorizedException('Email ou senha inválidos');
@@ -244,9 +243,7 @@ export class AuthService {
         pagina.searchParams.set('token', token);
         pagina.searchParams.set('redirect_url', urlExpo);
         return pagina.toString();
-      } catch {
-        // Usa abaixo a URL configurada no servidor.
-      }
+      } catch {}
     }
 
     const link = new URL(
@@ -266,9 +263,7 @@ export class AuthService {
       if (protocoloExpo && url.hostname && rotaCorreta && !url.search && !url.hash) {
         return url.toString();
       }
-    } catch {
-      // A mensagem pública é a mesma para qualquer URL inválida.
-    }
+    } catch {}
 
     throw new BadRequestException('O endereço do Expo Go é inválido');
   }

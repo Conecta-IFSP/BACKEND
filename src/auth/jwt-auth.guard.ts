@@ -43,7 +43,6 @@ export class JwtAuthGuard implements CanActivate {
     if (!usuario) {
       throw new UnauthorizedException('Conta inexistente ou desativada');
     }
-    // O token identifica a conta; as permissões sempre vêm do cadastro atual.
     requisicao.usuario.tipo = usuario.tipo;
     requisicao.usuario.email = usuario.email;
     return true;
