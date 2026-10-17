@@ -6,6 +6,7 @@ import { OrganizacoesModule } from './organizacoes/organizacoes.module.js';
 import { ComissoesModule } from './comissoes/comissoes.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { SistemaModule } from './sistema/sistema.module.js';
+import { ReunioesModule } from './reunioes/reunioes.module.js';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { SistemaModule } from './sistema/sistema.module.js';
     ComissoesModule,
     AuthModule,
     SistemaModule,
+    ReunioesModule,
   ],
 })
 export class AppModule {}
