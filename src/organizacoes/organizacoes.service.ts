@@ -10,11 +10,13 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 
 import {
+  gerarCodigoAcesso,
   Organizacao,
   OrganizacaoDocument,
   PapelOrganizacao,
   StatusMembroOrganizacao,
   StatusOrganizacao,
+  TAMANHO_CODIGO,
 } from './schemas/organizacao.schema.js';
 
 import {
@@ -35,6 +37,8 @@ import {
   UpdatePapelMembroDto,
   UpdateStatusMembroDto,
 } from './dto/update-status-membro.dto.js';
+
+const TENTATIVAS_CODIGO = 5;
 
 @Injectable()
 export class OrganizacoesService {
@@ -59,7 +63,7 @@ export class OrganizacoesService {
     const nome = createOrganizacaoDto.nome.trim();
     await this.exigirNomeDisponivel(nome);
 
-    const organizacao = await this.organizacaoModel.create({
+    const dados = {
       nome,
       descricao: createOrganizacaoDto.descricao?.trim() || undefined,
       criada_por: new Types.ObjectId(usuarioId),
@@ -74,9 +78,61 @@ export class OrganizacoesService {
           aprovado_em: new Date(),
         },
       ],
-    });
+    };
 
-    return organizacao;
+    for (let tentativa = 1; ; tentativa++) {
+      try {
+        const criada = await this.organizacaoModel.create(dados);
+        const resposta: Partial<Organizacao> = criada.toObject?.() ?? criada;
+        delete resposta.codigo_acesso;
+        return resposta;
+      } catch (erro) {
+        if (!this.codigoRepetido(erro) || tentativa >= TENTATIVAS_CODIGO) throw erro;
+      }
+    }
+  }
+
+  async entrarComCodigo(codigo: string, usuarioId: string) {
+    const normalizado = codigo.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const organizacao =
+      normalizado.length === TAMANHO_CODIGO
+        ? await this.organizacaoModel
+            .findOne({ codigo_acesso: normalizado, status: StatusOrganizacao.APROVADA })
+            .select('nome')
+            .exec()
+        : null;
+
+    if (!organizacao) {
+      throw new NotFoundException('Código inválido');
+    }
+
+    const resultado = await this.adicionarMembro(organizacao._id.toString(), usuarioId);
+    return {
+      ...resultado,
+      organizacao: { _id: organizacao._id, nome: organizacao.nome },
+    };
+  }
+
+  async gerarNovoCodigo(id: string, solicitanteId: string) {
+    await this.exigirAdministrador(id, solicitanteId);
+
+    for (let tentativa = 1; ; tentativa++) {
+      const codigo = gerarCodigoAcesso();
+      try {
+        const resultado = await this.organizacaoModel
+          .updateOne(
+            { _id: id, $and: [this.administradorAprovado(solicitanteId)] },
+            { $set: { codigo_acesso: codigo } },
+          )
+          .exec();
+        if (resultado.modifiedCount !== 1) {
+          throw new ConflictException('As permissões mudaram. Atualize a tela');
+        }
+        return { mensagem: 'Novo código gerado', codigo_acesso: codigo };
+      } catch (erro) {
+        if (!this.codigoRepetido(erro) || tentativa >= TENTATIVAS_CODIGO) throw erro;
+      }
+    }
   }
 
   async listar(tipoUsuario: TipoUsuario, usuarioId: string, busca?: string) {
@@ -93,10 +149,7 @@ export class OrganizacoesService {
 
     const organizacoes = await this.organizacaoModel
       .find({
-        $or: [
-          { status: StatusOrganizacao.APROVADA },
-          { 'membros.usuario_id': new Types.ObjectId(usuarioId) },
-        ],
+        'membros.usuario_id': new Types.ObjectId(usuarioId),
         ...porNome,
       })
       .select('nome descricao status membros')
@@ -131,6 +184,7 @@ export class OrganizacoesService {
 
     const organizacao = await this.organizacaoModel
       .findById(id)
+      .select('+codigo_acesso')
       .populate('criada_por', 'nome email tipo ativo')
       .populate('membros.usuario_id', 'nome email tipo ativo')
       .exec();
@@ -628,6 +682,11 @@ export class OrganizacoesService {
         },
       },
     };
+  }
+
+  private codigoRepetido(erro: unknown) {
+    const falha = erro as { code?: number; keyPattern?: Record<string, unknown> };
+    return falha?.code === 11000 && Boolean(falha.keyPattern?.codigo_acesso);
   }
 
   private escaparRegex(texto: string) {

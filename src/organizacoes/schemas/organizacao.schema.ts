@@ -1,7 +1,19 @@
+import { randomInt } from 'node:crypto';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
 export type OrganizacaoDocument = HydratedDocument<Organizacao>;
+
+export const ALFABETO_CODIGO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export const TAMANHO_CODIGO = 10;
+
+export function gerarCodigoAcesso() {
+  let codigo = '';
+  for (let i = 0; i < TAMANHO_CODIGO; i++) {
+    codigo += ALFABETO_CODIGO[randomInt(ALFABETO_CODIGO.length)];
+  }
+  return codigo;
+}
 
 export enum StatusOrganizacao {
   PENDENTE = 'PENDENTE',
@@ -84,6 +96,14 @@ export class Organizacao {
     required: true,
   })
   criada_por: Types.ObjectId;
+
+  @Prop({
+    required: true,
+    unique: true,
+    select: false,
+    default: gerarCodigoAcesso,
+  })
+  codigo_acesso: string;
 
   @Prop({
     type: [MembroOrganizacaoSchema],

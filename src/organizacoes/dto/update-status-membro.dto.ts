@@ -1,4 +1,4 @@
-import { IsBoolean, IsEmail, IsEnum, IsIn } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsIn, IsString, MaxLength } from 'class-validator';
 
 import { PapelOrganizacao, StatusMembroOrganizacao } from '../schemas/organizacao.schema.js';
 
@@ -15,6 +15,12 @@ export class UpdatePapelMembroDto {
 export class ConvidarMembroDto {
   @IsEmail({}, { message: 'Informe um e-mail válido' })
   email: string;
+}
+
+export class EntrarComCodigoDto {
+  @IsString({ message: 'Informe o código' })
+  @MaxLength(20, { message: 'Código inválido' })
+  codigo: string;
 }
 
 export class ResponderConviteDto {

@@ -170,7 +170,72 @@ describe('Permissões e solicitações de organizações', () => {
     );
   });
 
-  it('catálogo lista as aprovadas e as do próprio usuário sem divulgar membros', async () => {
+  it('cria com outro código quando o sorteado já existe', async () => {
+    const repetido = Object.assign(new Error('duplicado'), { code: 11000, keyPattern: { codigo_acesso: 1 } });
+    model.create.mockRejectedValueOnce(repetido).mockResolvedValueOnce({ nome: 'Organização A' });
+    await expect(service.criar({ nome: 'Organização A' }, admin)).resolves.toEqual({ nome: 'Organização A' });
+    expect(model.create).toHaveBeenCalledTimes(2);
+
+    const nomeRepetido = Object.assign(new Error('duplicado'), { code: 11000, keyPattern: { nome: 1 } });
+    model.create.mockRejectedValueOnce(nomeRepetido);
+    await expect(service.criar({ nome: 'Organização B' }, admin)).rejects.toBe(nomeRepetido);
+  });
+
+  describe('código de acesso', () => {
+    const buscar = (valor: unknown) => ({
+      select: vi.fn().mockReturnThis(),
+      exec: vi.fn().mockResolvedValue(valor),
+    });
+
+    beforeEach(() => {
+      Object.assign(model, { findOne: vi.fn(() => buscar({ _id: new Types.ObjectId(orgId), nome: 'Organização A' })) });
+    });
+
+    it('normaliza o código, busca só organização aprovada e cria o pedido pendente', async () => {
+      const resposta = await service.entrarComCodigo(' k7qx4-m9p2a ', usuario);
+      expect((model as unknown as { findOne: ReturnType<typeof vi.fn> }).findOne).toHaveBeenCalledWith({
+        codigo_acesso: 'K7QX4M9P2A',
+        status: StatusOrganizacao.APROVADA,
+      });
+      expect(resposta).toMatchObject({
+        mensagem: 'Solicitação enviada para análise',
+        organizacao: { nome: 'Organização A' },
+        membro: { status: StatusMembroOrganizacao.PENDENTE },
+      });
+    });
+
+    it('responde o mesmo erro para código curto, inexistente ou de organização não aprovada', async () => {
+      const findOne = (model as unknown as { findOne: ReturnType<typeof vi.fn> }).findOne;
+      await expect(service.entrarComCodigo('K7QX4', usuario)).rejects.toThrow('Código inválido');
+      expect(findOne).not.toHaveBeenCalled();
+      findOne.mockReturnValue(buscar(null));
+      await expect(service.entrarComCodigo('K7QX4M9P2A', usuario)).rejects.toThrow('Código inválido');
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('segue as regras de vínculo ao entrar com código', async () => {
+      vincular(StatusMembroOrganizacao.CONVIDADO);
+      await expect(service.entrarComCodigo('K7QX4M9P2A', usuario)).rejects.toThrow(
+        'Você já recebeu um convite desta organização',
+      );
+    });
+
+    it('só administrador gera novo código, e a gravação confere o administrador', async () => {
+      await expect(service.gerarNovoCodigo(orgId, usuario)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(model.updateOne).not.toHaveBeenCalled();
+
+      const resposta = await service.gerarNovoCodigo(orgId, admin);
+      expect(resposta.codigo_acesso).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{10}$/);
+      const [filtro, alteracao] = model.updateOne.mock.calls[0];
+      expect(filtro.$and[0].membros.$elemMatch.papel).toBe(PapelOrganizacao.ADMIN);
+      expect(alteracao).toEqual({ $set: { codigo_acesso: resposta.codigo_acesso } });
+
+      model.updateOne.mockReturnValue(consulta({ modifiedCount: 0 }));
+      await expect(service.gerarNovoCodigo(orgId, admin)).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  it('lista só as organizações com vínculo do usuário, sem divulgar membros', async () => {
     const query = {
       select: vi.fn().mockReturnThis(),
       sort: vi.fn().mockReturnThis(),
@@ -193,10 +258,7 @@ describe('Permissões e solicitações de organizações', () => {
     model.find.mockReturnValue(query);
     const lista = await service.listar(TipoUsuario.USUARIO, usuario);
     expect(model.find).toHaveBeenCalledWith({
-      $or: [
-        { status: StatusOrganizacao.APROVADA },
-        { 'membros.usuario_id': new Types.ObjectId(usuario) },
-      ],
+      'membros.usuario_id': new Types.ObjectId(usuario),
     });
     expect(query.select).toHaveBeenCalledWith(
       'nome descricao status membros',
@@ -270,7 +332,7 @@ describe('Permissões e solicitações de organizações', () => {
     await service.listar(TipoUsuario.USUARIO, usuario, '  Conselho (A).  ');
 
     const [filtro] = model.find.mock.calls[0];
-    expect(filtro.$or).toHaveLength(2);
+    expect(filtro['membros.usuario_id']).toEqual(new Types.ObjectId(usuario));
     expect(filtro.nome).toEqual(/Conselho \(A\)\./i);
     expect(filtro.nome.test('conselho (a). municipal')).toBe(true);
     expect(filtro.nome.test('Conselho AA')).toBe(false);
