@@ -13,6 +13,7 @@ import {
   type OrganizacaoDocument,
 } from '../organizacoes/schemas/organizacao.schema.js';
 import { Comissao, PapelComissao, type ComissaoDocument } from '../comissoes/schemas/comissao.schema.js';
+import { Reuniao, type ReuniaoDocument } from '../reunioes/schemas/reuniao.schema.js';
 
 const SENHA_USUARIO_TESTE = 'Teste@123';
 
@@ -22,6 +23,7 @@ export class SistemaService {
     @InjectModel(Usuario.name) private readonly usuarios: Model<UsuarioDocument>,
     @InjectModel(Organizacao.name) private readonly organizacoes: Model<OrganizacaoDocument>,
     @InjectModel(Comissao.name) private readonly comissoes: Model<ComissaoDocument>,
+    @InjectModel(Reuniao.name) private readonly reunioes: Model<ReuniaoDocument>,
   ) {}
 
   async status() {
@@ -84,6 +86,7 @@ export class SistemaService {
       this.usuarios.deleteMany({ tipo: { $ne: TipoUsuario.ADMIN_SISTEMA } }).exec(),
       this.organizacoes.deleteMany({}).exec(),
       this.comissoes.deleteMany({}).exec(),
+      this.reunioes.deleteMany({}).exec(),
     ]);
 
     return { status: 'sistema_resetado', resetado_em: new Date() };

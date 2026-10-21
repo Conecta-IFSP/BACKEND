@@ -9,6 +9,7 @@ import { AuthService } from '../auth/auth.service.js';
 import { Usuario, TipoUsuario } from './schemas/usuario.schema.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { AdminSistemaGuard } from '../auth/admin-sistema.guard.js';
+import { AuthService } from '../auth/auth.service.js';
 
 describe('Permissões atuais com token antigo', () => {
   let app: INestApplication;
@@ -16,7 +17,7 @@ describe('Permissões atuais com token antigo', () => {
   let conta: { ativo: boolean; tipo: TipoUsuario } | null;
   const id = '507f1f77bcf86cd799439011';
   const service = {
-    criar: vi.fn().mockResolvedValue({ _id: '507f1f77bcf86cd799439011' }),
+    criar: vi.fn().mockResolvedValue({ _id: id }),
     listar: vi.fn().mockResolvedValue([]),
     buscarPorId: vi.fn().mockResolvedValue({}),
     atualizar: vi.fn().mockResolvedValue({}),

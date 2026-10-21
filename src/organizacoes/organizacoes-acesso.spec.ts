@@ -23,7 +23,8 @@ describe('Rotas autenticadas de organizações', () => {
     buscarPorId: vi.fn().mockResolvedValue({}),
     atualizar: vi.fn().mockResolvedValue({}),
     remover: vi.fn().mockResolvedValue({}),
-    adicionarMembro: vi.fn().mockResolvedValue({}),
+    entrarComCodigo: vi.fn().mockResolvedValue({}),
+    gerarNovoCodigo: vi.fn().mockResolvedValue({}),
     atualizarStatusMembro: vi.fn().mockResolvedValue({}),
     removerMembro: vi.fn().mockResolvedValue({}),
     alterarPapelMembro: vi.fn().mockResolvedValue({}),
@@ -79,9 +80,10 @@ describe('Rotas autenticadas de organizações', () => {
       .expect(401);
     await request(servidor).delete(`/organizacoes/${orgId}`).expect(401);
     await request(servidor)
-      .post(`/organizacoes/${orgId}/membros`)
-      .send({})
+      .post('/organizacoes/entrar')
+      .send({ codigo: 'K7QX4M9P2A' })
       .expect(401);
+    await request(servidor).post(`/organizacoes/${orgId}/codigo`).expect(401);
     await request(servidor)
       .patch(`/organizacoes/${orgId}/membros/${usuarioId}`)
       .send({ status: 'APROVADO' })
@@ -136,13 +138,27 @@ describe('Rotas autenticadas de organizações', () => {
       .expect(401);
   });
 
-  it('usa a sessão mesmo que o corpo tente solicitar por outra pessoa como ADMIN', async () => {
-    await request(app.getHttpServer())
-      .post(`/organizacoes/${orgId}/membros`)
+  it('entrar com código valida o corpo e usa a sessão mesmo que o corpo tente outra pessoa', async () => {
+    const servidor = app.getHttpServer();
+    await request(servidor)
+      .post('/organizacoes/entrar')
       .auth(token, { type: 'bearer' })
-      .send({ usuario_id: orgId, papel: 'ADMIN' })
+      .send({})
+      .expect(400);
+    await request(servidor)
+      .post('/organizacoes/entrar')
+      .auth(token, { type: 'bearer' })
+      .send({ codigo: 'K7QX4-M9P2A', usuario_id: orgId, papel: 'ADMIN' })
       .expect(201);
-    expect(service.adicionarMembro).toHaveBeenCalledWith(orgId, usuarioId);
+    expect(service.entrarComCodigo).toHaveBeenCalledWith('K7QX4-M9P2A', usuarioId);
+  });
+
+  it('gerar novo código usa o solicitante da sessão', async () => {
+    await request(app.getHttpServer())
+      .post(`/organizacoes/${orgId}/codigo`)
+      .auth(token, { type: 'bearer' })
+      .expect(201);
+    expect(service.gerarNovoCodigo).toHaveBeenCalledWith(orgId, usuarioId);
   });
 
   it('informa o papel atualizado ao listar organizações', async () => {
@@ -308,7 +324,12 @@ describe('Rotas autenticadas de organizações', () => {
       .send({ nome: 'Organização do administrador' })
       .expect(403);
     await request(servidor)
-      .post(`/organizacoes/${orgId}/membros`)
+      .post('/organizacoes/entrar')
+      .auth(token, { type: 'bearer' })
+      .send({ codigo: 'K7QX4M9P2A' })
+      .expect(403);
+    await request(servidor)
+      .post(`/organizacoes/${orgId}/codigo`)
       .auth(token, { type: 'bearer' })
       .expect(403);
     await request(servidor)
@@ -318,7 +339,8 @@ describe('Rotas autenticadas de organizações', () => {
       .expect(403);
 
     expect(service.criar).not.toHaveBeenCalled();
-    expect(service.adicionarMembro).not.toHaveBeenCalled();
+    expect(service.entrarComCodigo).not.toHaveBeenCalled();
+    expect(service.gerarNovoCodigo).not.toHaveBeenCalled();
     expect(service.atualizarStatusMembro).not.toHaveBeenCalled();
   });
 });

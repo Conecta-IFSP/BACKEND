@@ -17,6 +17,7 @@ import { CreateOrganizacaoDto } from './dto/create-organizacao.dto.js';
 import { UpdateOrganizacaoDto } from './dto/update-organizacao.dto.js';
 import {
   ConvidarMembroDto,
+  EntrarComCodigoDto,
   ResponderConviteDto,
   UpdatePapelMembroDto,
   UpdateStatusMembroDto,
@@ -80,13 +81,22 @@ export class OrganizacoesController {
     return this.organizacoesService.remover(id);
   }
 
-  @Post(':id/membros')
+  @Post('entrar')
   @UseGuards(UsuarioComumGuard)
-  adicionarMembro(
+  entrarComCodigo(
+    @Body() entrarDto: EntrarComCodigoDto,
+    @Req() requisicao: RequisicaoAutenticada,
+  ) {
+    return this.organizacoesService.entrarComCodigo(entrarDto.codigo, requisicao.usuario.sub);
+  }
+
+  @Post(':id/codigo')
+  @UseGuards(UsuarioComumGuard)
+  gerarNovoCodigo(
     @Param('id') id: string,
     @Req() requisicao: RequisicaoAutenticada,
   ) {
-    return this.organizacoesService.adicionarMembro(id, requisicao.usuario.sub);
+    return this.organizacoesService.gerarNovoCodigo(id, requisicao.usuario.sub);
   }
 
   @Delete(':id/membros/:usuarioId')

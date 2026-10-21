@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Req,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 
@@ -30,8 +31,14 @@ export class UsuariosController {
   criar(@Body() createUsuarioDto: CreateUsuarioDto) {
     return this.usuariosService.criar(createUsuarioDto).then(async (usuario) => {
       if (!usuario) return usuario;
-      if (usuario._id && this.authService?.enviarCodigoVerificacao) {
+      try {
         await this.authService.enviarCodigoVerificacao(usuario._id.toString());
+      } catch (erro) {
+        console.error(erro);
+        await this.usuariosService.descartarNaoVerificado(usuario._id.toString());
+        throw new ServiceUnavailableException(
+          'Não foi possível enviar o e-mail de confirmação. Tente novamente.',
+        );
       }
       return { mensagem: 'Conta criada. Confira seu e-mail para finalizar o cadastro.' };
     });

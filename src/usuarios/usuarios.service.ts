@@ -242,6 +242,11 @@ export class UsuariosService implements OnApplicationBootstrap {
     };
   }
 
+  async descartarNaoVerificado(id: string) {
+    this.validarId(id);
+    await this.usuarioModel.deleteOne({ _id: id, email_verificado: false }).exec();
+  }
+
   private validarId(id: string) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('ID de usuário inválido');
