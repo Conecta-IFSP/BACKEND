@@ -13,12 +13,14 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import {
   Usuario,
   UsuarioDocument,
+  ProvedorAutenticacao,
 } from '../usuarios/schemas/usuario.schema.js';
 
 import { LoginDto } from './dto/login.dto.js';
 import { RecuperarContaDto } from './dto/recuperar-conta.dto.js';
 import { RedefinirSenhaDto } from './dto/redefinir-senha.dto.js';
 import { VerificarCadastroDto } from './dto/verificar-cadastro.dto.js';
+import { GoogleLoginDto } from './dto/google-login.dto.js';
 
 const DURACAO_TOKEN_RECUPERACAO_MS = 30 * 60 * 1000;
 const DURACAO_CODIGO_VERIFICACAO_MS = 30 * 60 * 1000;
@@ -81,6 +83,181 @@ export class AuthService {
     return {
       access_token: accessToken,
 
+      usuario: {
+        id: usuario._id,
+        nome: usuario.nome,
+        email: usuario.email,
+        tipo: usuario.tipo,
+        tema: usuario.tema,
+      },
+    };
+  }
+
+  async loginComGoogle(dto: GoogleLoginDto) {
+    let payload: {
+      sub: string;
+      email: string;
+      email_verified: boolean | string;
+      name?: string;
+      picture?: string;
+    };
+
+    if (dto.idToken?.trim()) {
+      // O SDK nativo retorna um ID Token com audience do cliente Web.
+      // O cliente Android/iOS é validado pelo Google Play Services/SDK.
+      const webClientId = this.configService.getOrThrow<string>('GOOGLE_CLIENT_ID');
+      payload = await this.validarIdTokenGoogle(dto.idToken.trim(), webClientId);
+    } else {
+      if (!dto.code || !dto.code.trim()) {
+        throw new BadRequestException('Código de autorização não informado');
+      }
+    const redirectUri = dto.redirectUri?.trim() || dto.redirect_uri?.trim();
+    if (!redirectUri) {
+      throw new BadRequestException('URI de redirecionamento não informada');
+    }
+
+    const isNativeRedirect = /^(conectamais|exp):\/\//i.test(redirectUri);
+    const clientID = isNativeRedirect && dto.plataforma === 'android'
+      ? this.configService.get<string>('GOOGLE_ANDROID_CLIENT_ID') ??
+        this.configService.getOrThrow<string>('GOOGLE_CLIENT_ID')
+      : isNativeRedirect && dto.plataforma === 'ios'
+        ? this.configService.get<string>('GOOGLE_IOS_CLIENT_ID') ??
+          this.configService.getOrThrow<string>('GOOGLE_CLIENT_ID')
+        : this.configService.getOrThrow<string>('GOOGLE_CLIENT_ID');
+    const clientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET');
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code: dto.code,
+        client_id: clientID,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+        ...(isNativeRedirect && !clientSecret ? {} : { client_secret: clientSecret ?? '' }),
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const erro = await tokenResponse.json().catch(() => ({}));
+      throw new BadRequestException(erro.error_description ?? 'Falha ao trocar código por token');
+    }
+
+    const tokens = await tokenResponse.json();
+    const idToken = tokens.id_token as string;
+
+    if (!idToken) {
+      throw new BadRequestException('ID Token não retornado pelo Google');
+    }
+
+    payload = await this.validarIdTokenGoogle(idToken, clientID);
+    }
+
+    const googleId = payload.sub;
+    const email = payload.email.toLowerCase().trim();
+    // O endpoint tokeninfo pode retornar esse campo como boolean ou como
+    // string ("true"), dependendo do fluxo OAuth.
+    const emailVerificado =
+      payload.email_verified === true || payload.email_verified === 'true';
+    const nome = payload.name ?? '';
+    const avatarUrl = payload.picture;
+
+    if (!emailVerificado) {
+      throw new BadRequestException('O e-mail da conta Google não está verificado');
+    }
+
+    let usuario = await this.usuarioModel.findOne({ googleId }).exec();
+
+    if (usuario) {
+      if (!usuario.ativo) {
+        throw new UnauthorizedException('Conta desativada');
+      }
+      usuario.nome = nome;
+      usuario.avatarUrl = avatarUrl;
+      if (!usuario.email_verificado) {
+        usuario.email_verificado = true;
+      }
+      if (usuario.provedorAutenticacao === ProvedorAutenticacao.LOCAL) {
+        usuario.provedorAutenticacao = ProvedorAutenticacao.AMBOS;
+      }
+      await usuario.save();
+      return this.gerarRespostaLogin(usuario);
+    }
+
+    usuario = await this.usuarioModel.findOne({ email }).exec();
+
+    if (usuario) {
+      if (!usuario.ativo) {
+        throw new UnauthorizedException('Conta desativada');
+      }
+      if (usuario.googleId && usuario.googleId !== googleId) {
+        throw new BadRequestException('Este e-mail já está vinculado a outra conta Google');
+      }
+      usuario.googleId = googleId;
+      usuario.nome = nome;
+      usuario.avatarUrl = avatarUrl;
+      if (!usuario.email_verificado) {
+        usuario.email_verificado = true;
+      }
+      if (usuario.provedorAutenticacao === ProvedorAutenticacao.LOCAL) {
+        usuario.provedorAutenticacao = ProvedorAutenticacao.AMBOS;
+      } else if (usuario.provedorAutenticacao === ProvedorAutenticacao.GOOGLE) {
+        usuario.provedorAutenticacao = ProvedorAutenticacao.GOOGLE;
+      }
+      await usuario.save();
+      return this.gerarRespostaLogin(usuario);
+    }
+
+    usuario = await this.usuarioModel.create({
+      nome,
+      email,
+      googleId,
+      avatarUrl,
+      email_verificado: true,
+      provedorAutenticacao: ProvedorAutenticacao.GOOGLE,
+      senha_hash: undefined,
+    });
+
+    return this.gerarRespostaLogin(usuario);
+  }
+
+  private async validarIdTokenGoogle(idToken: string, clientID: string) {
+    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+    if (!response.ok) {
+      throw new BadRequestException('ID Token inválido ou expirado');
+    }
+    const payload = await response.json();
+
+    if (payload.aud !== clientID) {
+      throw new BadRequestException('ID Token emitido para outro cliente');
+    }
+    if (payload.iss !== 'accounts.google.com' && payload.iss !== 'https://accounts.google.com') {
+      throw new BadRequestException('Emissor do ID Token inválido');
+    }
+    const exp = Number(payload.exp);
+    if (!exp || exp * 1000 < Date.now()) {
+      throw new BadRequestException('ID Token expirado');
+    }
+
+    return payload as {
+      sub: string;
+      email: string;
+      email_verified: boolean | string;
+      name?: string;
+      picture?: string;
+    };
+  }
+
+  private gerarRespostaLogin(usuario: UsuarioDocument) {
+    const payload = {
+      sub: usuario._id.toString(),
+      email: usuario.email,
+      tipo: usuario.tipo,
+    };
+
+    const accessToken = this.jwtService.sign(payload);
+
+    return {
+      access_token: accessToken,
       usuario: {
         id: usuario._id,
         nome: usuario.nome,

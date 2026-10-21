@@ -6,7 +6,23 @@ import { AppModule } from './app.module.js';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  app.enableCors();
+  const allowedOrigins: (string | RegExp)[] = [
+    /^https?:\/\/localhost(:\d+)?$/,
+    /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+    /^conectamais:\/\//,
+  ];
+
+  const frontendUrl = process.env.FRONTEND_URL;
+  if (frontendUrl) {
+    allowedOrigins.push(frontendUrl);
+  }
+
+  app.enableCors({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({

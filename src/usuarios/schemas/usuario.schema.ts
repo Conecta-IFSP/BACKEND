@@ -14,6 +14,12 @@ export enum TemaUsuario {
   SISTEMA = 'sistema',
 }
 
+export enum ProvedorAutenticacao {
+  LOCAL = 'LOCAL',
+  GOOGLE = 'GOOGLE',
+  AMBOS = 'AMBOS',
+}
+
 @Schema({
   collection: 'usuarios',
   timestamps: {
@@ -37,10 +43,10 @@ export class Usuario {
   email: string;
 
   @Prop({
-    required: true,
+    required: false,
     select: false,
   })
-  senha_hash: string;
+  senha_hash?: string;
 
   @Prop({ select: false })
   senhaHash?: string;
@@ -78,6 +84,19 @@ export class Usuario {
     default: true,
   })
   ativo: boolean;
+
+  @Prop({ select: false, sparse: true, unique: true })
+  googleId?: string;
+
+  @Prop({
+    type: String,
+    enum: ProvedorAutenticacao,
+    default: ProvedorAutenticacao.LOCAL,
+  })
+  provedorAutenticacao: ProvedorAutenticacao;
+
+  @Prop({ select: false })
+  avatarUrl?: string;
 }
 
 export const UsuarioSchema = SchemaFactory.createForClass(Usuario);

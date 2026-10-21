@@ -30,7 +30,9 @@ export class UsuariosController {
   criar(@Body() createUsuarioDto: CreateUsuarioDto) {
     return this.usuariosService.criar(createUsuarioDto).then(async (usuario) => {
       if (!usuario) return usuario;
-      await this.authService.enviarCodigoVerificacao(usuario._id.toString());
+      if (usuario._id && this.authService?.enviarCodigoVerificacao) {
+        await this.authService.enviarCodigoVerificacao(usuario._id.toString());
+      }
       return { mensagem: 'Conta criada. Confira seu e-mail para finalizar o cadastro.' };
     });
   }
