@@ -5,6 +5,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import request from 'supertest';
 import { UsuariosController } from './usuarios.controller.js';
 import { UsuariosService } from './usuarios.service.js';
+import { AuthService } from '../auth/auth.service.js';
 import { Usuario, TipoUsuario } from './schemas/usuario.schema.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { AdminSistemaGuard } from '../auth/admin-sistema.guard.js';
