@@ -50,7 +50,10 @@ export class ComissoesService {
       throw new ForbiddenException('Usuário sem acesso ativo');
   }
 
-  private administra(organizacao: Pick<Organizacao, 'membros'>, usuarioId: string) {
+  private administra(
+    organizacao: Pick<Organizacao, 'membros'>,
+    usuarioId: string,
+  ) {
     return organizacao.membros.some(
       (membro) =>
         membro.usuario_id.toString() === usuarioId &&
@@ -66,7 +69,10 @@ export class ComissoesService {
       .findById(organizacaoId)
       .exec();
     if (!organizacao) throw new NotFoundException('Organização não encontrada');
-    if (!this.administra(organizacao, usuarioId) || organizacao.status !== StatusOrganizacao.APROVADA) {
+    if (
+      !this.administra(organizacao, usuarioId) ||
+      organizacao.status !== StatusOrganizacao.APROVADA
+    ) {
       throw new ForbiddenException(
         'Apenas administradores da organização podem gerenciar comissões',
       );
@@ -133,19 +139,28 @@ export class ComissoesService {
   async listarMinhas(organizacaoId: string, usuarioId: string) {
     this.validarId(organizacaoId);
     await this.validarUsuario(usuarioId);
-    const organizacao = await this.organizacaoModel.findById(organizacaoId).exec();
+    const organizacao = await this.organizacaoModel
+      .findById(organizacaoId)
+      .exec();
     if (!organizacao) throw new NotFoundException('Organização não encontrada');
-    const membro = organizacao.membros.some((item) =>
-      item.usuario_id.toString() === usuarioId &&
-      item.status === StatusMembroOrganizacao.APROVADO,
+    const membro = organizacao.membros.some(
+      (item) =>
+        item.usuario_id.toString() === usuarioId &&
+        item.status === StatusMembroOrganizacao.APROVADO,
     );
     if (!membro || organizacao.status !== StatusOrganizacao.APROVADA) {
-      throw new ForbiddenException('Você precisa ser membro aprovado de uma organização autorizada');
+      throw new ForbiddenException(
+        'Você precisa ser membro aprovado de uma organização autorizada',
+      );
     }
-    const comissoes = await this.comissaoModel.find({
-      organizacao_id: organizacao._id,
-      'membros.usuario_id': new Types.ObjectId(usuarioId),
-    }).select('nome descricao ativo membros').sort({ nome: 1 }).exec();
+    const comissoes = await this.comissaoModel
+      .find({
+        organizacao_id: organizacao._id,
+        'membros.usuario_id': new Types.ObjectId(usuarioId),
+      })
+      .select('nome descricao ativo membros')
+      .sort({ nome: 1 })
+      .exec();
     return {
       organizacao: { _id: organizacao._id, nome: organizacao.nome },
       comissoes: comissoes.map((comissao) => ({
@@ -153,7 +168,9 @@ export class ComissoesService {
         nome: comissao.nome,
         descricao: comissao.descricao,
         ativo: comissao.ativo,
-        meu_papel: comissao.membros.find((item) => item.usuario_id.toString() === usuarioId)?.papel,
+        meu_papel: comissao.membros.find(
+          (item) => item.usuario_id.toString() === usuarioId,
+        )?.papel,
       })),
     };
   }
@@ -175,11 +192,22 @@ export class ComissoesService {
 
   async criar(dto: CreateComissaoDto, usuarioId: string) {
     await this.autorizarOrganizacao(dto.organizacao_id, usuarioId);
+    await this.exigirElegivel(
+      dto.organizacao_id,
+      dto.responsavel_id,
+      usuarioId,
+    );
     const comissao = await this.comissaoModel.create({
       nome: dto.nome,
       descricao: dto.descricao,
       organizacao_id: new Types.ObjectId(dto.organizacao_id),
-      membros: [],
+      membros: [
+        {
+          usuario_id: new Types.ObjectId(dto.responsavel_id),
+          papel: PapelComissao.RESPONSAVEL,
+          adicionado_em: new Date(),
+        },
+      ],
       ativo: true,
     });
     return this.popular(comissao);
@@ -191,7 +219,10 @@ export class ComissoesService {
       return this.consultar(
         this.administra(organizacao, usuarioId)
           ? { organizacao_id: organizacao._id }
-          : { organizacao_id: organizacao._id, 'membros.usuario_id': new Types.ObjectId(usuarioId) },
+          : {
+              organizacao_id: organizacao._id,
+              'membros.usuario_id': new Types.ObjectId(usuarioId),
+            },
       );
     }
 
@@ -201,7 +232,10 @@ export class ComissoesService {
       .find({
         status: StatusOrganizacao.APROVADA,
         membros: {
-          $elemMatch: { usuario_id: meuId, status: StatusMembroOrganizacao.APROVADO },
+          $elemMatch: {
+            usuario_id: meuId,
+            status: StatusMembroOrganizacao.APROVADO,
+          },
         },
       })
       .select('membros')
@@ -247,7 +281,8 @@ export class ComissoesService {
   }
 
   async atualizar(id: string, dto: UpdateComissaoDto, usuarioId: string) {
-    await this.autorizarComissao(id, usuarioId);
+    const atual = await this.autorizarComissao(id, usuarioId);
+    if (dto.ativo === true) this.exigirResponsavelUnico(atual);
     const dados: UpdateComissaoDto = {};
     if (dto.nome !== undefined) dados.nome = dto.nome;
     if (dto.descricao !== undefined) dados.descricao = dto.descricao;
@@ -256,7 +291,7 @@ export class ComissoesService {
       .findByIdAndUpdate(
         id,
         { $set: dados },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
     if (!comissao) throw new NotFoundException('Comissão não encontrada');
@@ -266,6 +301,80 @@ export class ComissoesService {
   async remover(id: string, usuarioId: string) {
     const comissao = await this.atualizar(id, { ativo: false }, usuarioId);
     return { mensagem: 'Comissão desativada com sucesso', comissao };
+  }
+
+  private exigirResponsavelUnico(comissao: ComissaoDocument) {
+    if (
+      comissao.membros.filter((m) => m.papel === PapelComissao.RESPONSAVEL)
+        .length !== 1
+    ) {
+      throw new BadRequestException(
+        'Defina exatamente um responsável para regularizar esta comissão',
+      );
+    }
+  }
+
+  private async exigirElegivel(
+    organizacaoId: string,
+    membroId: string,
+    usuarioId: string,
+  ) {
+    this.validarId(membroId);
+    const pessoas = await this.listarMembrosDisponiveis(
+      organizacaoId,
+      usuarioId,
+    );
+    if (!pessoas.some((pessoa) => pessoa._id.toString() === membroId)) {
+      throw new BadRequestException(
+        'O responsável ou integrante deve estar ativo e aprovado na organização',
+      );
+    }
+  }
+
+  private async gravarEquipe(
+    comissao: ComissaoDocument,
+    membros: Comissao['membros'],
+  ) {
+    // Compare-and-swap: não sobrescreve uma alteração de equipe concorrente.
+    // Uma única escrita substitui todos os papéis, sem estado intermediário sem responsável.
+    const atualizada = await this.comissaoModel
+      .findOneAndUpdate(
+        { _id: comissao._id, ativo: comissao.ativo, membros: comissao.membros },
+        { $set: { membros } },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    if (!atualizada)
+      throw new ConflictException(
+        'A comissão mudou. Atualize e tente novamente.',
+      );
+    return this.popular(atualizada);
+  }
+
+  async definirResponsavel(id: string, membroId: string, usuarioId: string) {
+    const comissao = await this.autorizarComissao(id, usuarioId);
+    await this.exigirElegivel(
+      comissao.organizacao_id.toString(),
+      membroId,
+      usuarioId,
+    );
+    const membros = comissao.membros.map((membro) => ({
+      usuario_id: membro.usuario_id,
+      adicionado_em: membro.adicionado_em,
+      papel:
+        membro.usuario_id.toString() === membroId
+          ? PapelComissao.RESPONSAVEL
+          : PapelComissao.MEMBRO,
+    }));
+    if (!membros.some((membro) => membro.usuario_id.toString() === membroId)) {
+      membros.push({
+        usuario_id: new Types.ObjectId(membroId),
+        papel: PapelComissao.RESPONSAVEL,
+        adicionado_em: new Date(),
+      });
+    }
+    // Também regulariza dados legados e comissões inativas, sem reativá-las.
+    return this.gravarEquipe(comissao, membros);
   }
 
   async adicionarMembro(
@@ -278,40 +387,34 @@ export class ComissoesService {
       throw new BadRequestException(
         'Reative a comissão antes de gerenciar sua equipe',
       );
-    this.validarId(dto.usuario_id);
-    const elegiveis = await this.listarMembrosDisponiveis(
-      comissao.organizacao_id.toString(),
-      usuarioId,
-    );
-    if (!elegiveis.some((membro) => membro._id.toString() === dto.usuario_id)) {
+    this.exigirResponsavelUnico(comissao);
+    if (dto.papel === PapelComissao.RESPONSAVEL) {
       throw new BadRequestException(
-        'O usuário precisa estar ativo e ser membro aprovado da organização',
+        'Use a substituição de responsável; a comissão deve ter exatamente um',
       );
     }
-    const atualizado = await this.comissaoModel
-      .findOneAndUpdate(
-        {
-          _id: id,
-          ativo: true,
-          'membros.usuario_id': { $ne: new Types.ObjectId(dto.usuario_id) },
-        },
-        {
-          $push: {
-            membros: {
-              usuario_id: new Types.ObjectId(dto.usuario_id),
-              papel: dto.papel ?? PapelComissao.MEMBRO,
-              adicionado_em: new Date(),
-            },
-          },
-        },
-        { new: true, runValidators: true },
-      )
-      .exec();
-    if (!atualizado)
-      throw new ConflictException(
-        'Usuário já pertence à comissão ou a comissão foi desativada. Atualize a tela.',
-      );
-    return this.popular(atualizado);
+    await this.exigirElegivel(
+      comissao.organizacao_id.toString(),
+      dto.usuario_id,
+      usuarioId,
+    );
+    if (
+      comissao.membros.some((m) => m.usuario_id.toString() === dto.usuario_id)
+    ) {
+      throw new ConflictException('Usuário já pertence à comissão');
+    }
+    return this.gravarEquipe(comissao, [
+      ...comissao.membros.map((m) => ({
+        usuario_id: m.usuario_id,
+        papel: m.papel,
+        adicionado_em: m.adicionado_em,
+      })),
+      {
+        usuario_id: new Types.ObjectId(dto.usuario_id),
+        papel: PapelComissao.MEMBRO,
+        adicionado_em: new Date(),
+      },
+    ]);
   }
 
   async atualizarMembro(
@@ -320,47 +423,48 @@ export class ComissoesService {
     papel: PapelComissao,
     usuarioId: string,
   ) {
-    await this.validarEquipe(id, membroId, usuarioId);
-    const comissao = await this.comissaoModel
-      .findOneAndUpdate(
-        {
-          _id: id,
-          ativo: true,
-          'membros.usuario_id': new Types.ObjectId(membroId),
-        },
-        {
-          $set: { 'membros.$.papel': papel },
-        },
-        { new: true, runValidators: true },
+    const comissao = await this.validarEquipe(id, membroId, usuarioId);
+    if (papel === PapelComissao.RESPONSAVEL)
+      return this.definirResponsavel(id, membroId, usuarioId);
+    this.exigirResponsavelUnico(comissao);
+    if (
+      comissao.membros.some(
+        (m) =>
+          m.usuario_id.toString() === membroId &&
+          m.papel === PapelComissao.RESPONSAVEL,
       )
-      .exec();
-    if (!comissao)
-      throw new ConflictException(
-        'A equipe mudou. Atualize a tela e tente novamente.',
+    ) {
+      throw new BadRequestException(
+        'Substitua o responsável antes de alterar seu papel',
       );
+    }
     return this.popular(comissao);
   }
 
   async removerMembro(id: string, membroId: string, usuarioId: string) {
-    await this.validarEquipe(id, membroId, usuarioId);
-    const comissao = await this.comissaoModel
-      .findOneAndUpdate(
-        {
-          _id: id,
-          ativo: true,
-          'membros.usuario_id': new Types.ObjectId(membroId),
-        },
-        {
-          $pull: { membros: { usuario_id: new Types.ObjectId(membroId) } },
-        },
-        { new: true },
+    const comissao = await this.validarEquipe(id, membroId, usuarioId);
+    this.exigirResponsavelUnico(comissao);
+    if (
+      comissao.membros.some(
+        (m) =>
+          m.usuario_id.toString() === membroId &&
+          m.papel === PapelComissao.RESPONSAVEL,
       )
-      .exec();
-    if (!comissao)
-      throw new ConflictException(
-        'A equipe mudou. Atualize a tela e tente novamente.',
+    ) {
+      throw new BadRequestException(
+        'Substitua o responsável antes de removê-lo',
       );
-    return this.popular(comissao);
+    }
+    return this.gravarEquipe(
+      comissao,
+      comissao.membros
+        .filter((m) => m.usuario_id.toString() !== membroId)
+        .map((m) => ({
+          usuario_id: m.usuario_id,
+          papel: m.papel,
+          adicionado_em: m.adicionado_em,
+        })),
+    );
   }
 
   private async validarEquipe(id: string, membroId: string, usuarioId: string) {
@@ -377,5 +481,6 @@ export class ComissoesService {
     ) {
       throw new NotFoundException('Usuário não pertence a esta comissão');
     }
+    return comissao;
   }
 }

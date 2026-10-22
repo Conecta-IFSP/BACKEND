@@ -21,4 +21,7 @@ export class CreateComissaoDto {
 
   @IsMongoId({ message: 'Selecione uma organização válida' })
   organizacao_id: string;
+
+  @IsMongoId({ message: 'Selecione um responsável válido' })
+  responsavel_id: string;
 }

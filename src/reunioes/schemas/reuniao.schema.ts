@@ -72,6 +72,31 @@ export class Participante {
 
 export const ParticipanteSchema = SchemaFactory.createForClass(Participante);
 
+@Schema({ _id: false })
+export class Ata {
+  @Prop({ required: true, minlength: 20, maxlength: 20000 })
+  conteudo: string;
+
+  @Prop({ required: true, min: 1 })
+  versao: number;
+
+  @Prop({ required: true, enum: ['RASCUNHO', 'EM_APROVACAO', 'APROVADA'] })
+  situacao: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'Usuario', required: true })
+  autor_id: Types.ObjectId;
+
+  @Prop({ required: true })
+  atualizada_em: Date;
+
+  @Prop({ type: [Types.ObjectId], default: [] })
+  aprovadores: Types.ObjectId[];
+
+  @Prop({ type: [Types.ObjectId], default: [] })
+  aprovacoes: Types.ObjectId[];
+}
+export const AtaSchema = SchemaFactory.createForClass(Ata);
+
 @Schema({
   collection: 'reunioes',
   timestamps: {
@@ -81,6 +106,8 @@ export const ParticipanteSchema = SchemaFactory.createForClass(Participante);
   versionKey: false,
 })
 export class Reuniao {
+  @Prop({ type: AtaSchema })
+  ata?: Ata;
   @Prop({
     type: Types.ObjectId,
     ref: 'Comissao',

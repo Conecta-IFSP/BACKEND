@@ -9,11 +9,15 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard, type RequisicaoAutenticada } from '../auth/jwt-auth.guard.js';
+import {
+  JwtAuthGuard,
+  type RequisicaoAutenticada,
+} from '../auth/jwt-auth.guard.js';
 import { UsuarioComumGuard } from '../auth/admin-sistema.guard.js';
 import { ReunioesService } from './reunioes.service.js';
 import { CreateReuniaoDto } from './dto/create-reuniao.dto.js';
 import { UpdateReuniaoDto } from './dto/update-reuniao.dto.js';
+import { SalvarAtaDto, VersaoAtaDto } from './dto/ata.dto.js';
 import {
   AtualizarPresencaDto,
   ResponderConviteReuniaoDto,
@@ -59,7 +63,11 @@ export class ReunioesController {
     @Body() dto: ResponderConviteReuniaoDto,
     @Req() req: RequisicaoAutenticada,
   ) {
-    return this.reunioesService.responderConvite(id, dto.aceito, req.usuario.sub);
+    return this.reunioesService.responderConvite(
+      id,
+      dto.aceito,
+      req.usuario.sub,
+    );
   }
   @Post(':id/entrada')
   marcarEntrada(@Param('id') id: string, @Req() req: RequisicaoAutenticada) {
@@ -82,5 +90,40 @@ export class ReunioesController {
       dto.situacao,
       req.usuario.sub,
     );
+  }
+
+  @Get(':id/lista-presenca')
+  gerarListaPresenca(
+    @Param('id') id: string,
+    @Req() req: RequisicaoAutenticada,
+  ) {
+    return this.reunioesService.gerarListaPresenca(id, req.usuario.sub);
+  }
+
+  @Patch(':id/ata')
+  salvarAta(
+    @Param('id') id: string,
+    @Body() dto: SalvarAtaDto,
+    @Req() req: RequisicaoAutenticada,
+  ) {
+    return this.reunioesService.salvarAta(id, dto, req.usuario.sub);
+  }
+
+  @Post(':id/ata/publicar')
+  publicarAta(
+    @Param('id') id: string,
+    @Body() dto: VersaoAtaDto,
+    @Req() req: RequisicaoAutenticada,
+  ) {
+    return this.reunioesService.publicarAta(id, dto.versao, req.usuario.sub);
+  }
+
+  @Post(':id/ata/aprovar')
+  aprovarAta(
+    @Param('id') id: string,
+    @Body() dto: VersaoAtaDto,
+    @Req() req: RequisicaoAutenticada,
+  ) {
+    return this.reunioesService.aprovarAta(id, dto.versao, req.usuario.sub);
   }
 }

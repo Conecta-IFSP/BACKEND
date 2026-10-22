@@ -1,13 +1,22 @@
 import { Transform } from 'class-transformer';
 import {
+  ArrayUnique,
+  IsArray,
   IsISO8601,
   IsMongoId,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 export class CreateReuniaoDto {
+  @ValidateIf((_, value) => value !== undefined)
+  @IsArray({ message: 'Informe a lista de convidados' })
+  @ArrayUnique({ message: 'Não repita convidados' })
+  @IsMongoId({ each: true, message: 'Convidado inválido' })
+  convidados_ids?: string[];
+
   @IsMongoId({ message: 'Selecione uma comissão válida' })
   comissao_id: string;
 

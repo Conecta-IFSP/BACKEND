@@ -61,6 +61,15 @@ export class Comissao {
   @Prop({
     type: [MembroComissaoSchema],
     default: [],
+    validate: {
+      validator: (membros: MembroComissao[]) =>
+        membros.filter((m) => m.papel === PapelComissao.RESPONSAVEL).length ===
+          1 &&
+        new Set(membros.map((m) => m.usuario_id.toString())).size ===
+          membros.length,
+      message:
+        'A comissão deve ter exatamente um responsável e integrantes únicos',
+    },
   })
   membros: MembroComissao[];
 

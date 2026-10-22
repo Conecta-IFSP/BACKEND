@@ -32,6 +32,8 @@ import {
 } from './schemas/reuniao.schema.js';
 import { CreateReuniaoDto } from './dto/create-reuniao.dto.js';
 import { UpdateReuniaoDto } from './dto/update-reuniao.dto.js';
+import { SalvarAtaDto } from './dto/ata.dto.js';
+import type { Ata } from './schemas/reuniao.schema.js';
 
 type FiltrosReuniao = { de?: string; ate?: string; comissao_id?: string };
 
@@ -153,16 +155,38 @@ export class ReunioesService {
     return { ...dados, sou_dono: dados.criada_por.toString() === usuarioId };
   }
 
-  private async responder(reuniao: ReuniaoDocument | null, usuarioId: string, conflito: string) {
+  private async responder(
+    reuniao: ReuniaoDocument | null,
+    usuarioId: string,
+    conflito: string,
+  ) {
     if (!reuniao) throw new ConflictException(conflito);
     return this.apresentar(await this.popular(reuniao), usuarioId);
   }
 
   async criar(dto: CreateReuniaoDto, usuarioId: string) {
-    const comissao = await this.autorizarResponsavel(dto.comissao_id, usuarioId);
+    const comissao = await this.autorizarResponsavel(
+      dto.comissao_id,
+      usuarioId,
+    );
     const inicio = this.lerData(dto.inicio, 'Informe um início válido');
     const fim = this.lerData(dto.fim, 'Informe um término válido');
     this.validarHorario(inicio, fim);
+    // Clientes anteriores sem o campo mantêm o comportamento antigo.
+    // Lista vazia significa somente o organizador; não significa convidar todos.
+    const escolhidos =
+      dto.convidados_ids ??
+      comissao.membros.map((m) => m.usuario_id.toString());
+    if (
+      escolhidos.some(
+        (id) => !comissao.membros.some((m) => m.usuario_id.toString() === id),
+      )
+    ) {
+      throw new BadRequestException(
+        'Convide apenas integrantes desta comissão',
+      );
+    }
+    const participantesIds = [...new Set([usuarioId, ...escolhidos])];
     const reuniao = await this.reuniaoModel.create({
       comissao_id: comissao._id,
       titulo: dto.titulo,
@@ -172,12 +196,10 @@ export class ReunioesService {
       pauta: dto.pauta ?? '',
       criada_por: new Types.ObjectId(usuarioId),
       situacao: SituacaoReuniao.AGENDADA,
-      participantes: comissao.membros.map((membro) => ({
-        usuario_id: membro.usuario_id,
+      participantes: participantesIds.map((id) => ({
+        usuario_id: new Types.ObjectId(id),
         convite:
-          membro.usuario_id.toString() === usuarioId
-            ? RespostaConvite.ACEITO
-            : RespostaConvite.PENDENTE,
+          id === usuarioId ? RespostaConvite.ACEITO : RespostaConvite.PENDENTE,
       })),
     });
     return this.apresentar(await this.popular(reuniao), usuarioId);
@@ -239,10 +261,14 @@ export class ReunioesService {
           situacao: SituacaoReuniao.AGENDADA,
         },
         { $set: dados },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
-    return this.responder(atualizada, usuarioId, 'A reunião mudou. Atualize a tela.');
+    return this.responder(
+      atualizada,
+      usuarioId,
+      'A reunião mudou. Atualize a tela.',
+    );
   }
 
   async responderConvite(id: string, aceito: boolean, usuarioId: string) {
@@ -264,10 +290,14 @@ export class ReunioesService {
               : RespostaConvite.RECUSADO,
           },
         },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
-    return this.responder(atualizada, usuarioId, 'A reunião mudou. Atualize a tela.');
+    return this.responder(
+      atualizada,
+      usuarioId,
+      'A reunião mudou. Atualize a tela.',
+    );
   }
 
   async marcarEntrada(id: string, usuarioId: string) {
@@ -303,10 +333,14 @@ export class ReunioesService {
             },
           },
         },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
-    return this.responder(atualizada, usuarioId, 'Sua entrada já foi registrada');
+    return this.responder(
+      atualizada,
+      usuarioId,
+      'Sua entrada já foi registrada',
+    );
   }
 
   async marcarSaida(id: string, usuarioId: string) {
@@ -336,7 +370,7 @@ export class ReunioesService {
               agora > reuniao.fim ? reuniao.fim : agora,
           },
         },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
     return this.responder(atualizada, usuarioId, 'Sua saída já foi registrada');
@@ -384,9 +418,167 @@ export class ReunioesService {
                 },
               },
             },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
-    return this.responder(atualizada, usuarioId, 'A presença mudou. Atualize a tela.');
+    return this.responder(
+      atualizada,
+      usuarioId,
+      'A presença mudou. Atualize a tela.',
+    );
+  }
+  private exigirEncerrada(reuniao: Reuniao) {
+    this.exigirAgendada(reuniao);
+    if (reuniao.fim > new Date())
+      throw new BadRequestException('Aguarde o término da reunião');
+  }
+
+  private async gravarAta(
+    reuniao: ReuniaoDocument,
+    ata: Ata,
+    usuarioId: string,
+  ) {
+    const atualizada = await this.reuniaoModel
+      .findOneAndUpdate(
+        {
+          _id: reuniao._id,
+          situacao: SituacaoReuniao.AGENDADA,
+          ata: reuniao.ata ?? { $exists: false },
+        },
+        { $set: { ata } },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    return this.responder(
+      atualizada,
+      usuarioId,
+      'A ata mudou. Atualize antes de continuar.',
+    );
+  }
+
+  async salvarAta(id: string, dto: SalvarAtaDto, usuarioId: string) {
+    const { reuniao } = await this.carregar(id, usuarioId);
+    await this.autorizarResponsavel(reuniao.comissao_id.toString(), usuarioId);
+    this.exigirEncerrada(reuniao);
+    if (reuniao.ata && reuniao.ata.situacao !== 'RASCUNHO') {
+      throw new BadRequestException(
+        'Uma ata enviada para aprovação não pode ser editada',
+      );
+    }
+    if (dto.versao !== (reuniao.ata?.versao ?? 0))
+      throw new ConflictException('Versão da ata desatualizada');
+    return this.gravarAta(
+      reuniao,
+      {
+        conteudo: dto.conteudo,
+        versao: dto.versao + 1,
+        situacao: 'RASCUNHO',
+        autor_id: new Types.ObjectId(usuarioId),
+        atualizada_em: new Date(),
+        aprovadores: [],
+        aprovacoes: [],
+      },
+      usuarioId,
+    );
+  }
+
+  async publicarAta(id: string, versao: number, usuarioId: string) {
+    const { reuniao } = await this.carregar(id, usuarioId);
+    await this.autorizarResponsavel(reuniao.comissao_id.toString(), usuarioId);
+    this.exigirEncerrada(reuniao);
+    const ata = reuniao.ata;
+    if (!ata || ata.situacao !== 'RASCUNHO')
+      throw new BadRequestException('Salve um rascunho antes de enviar');
+    if (ata.versao !== versao)
+      throw new ConflictException('Versão da ata desatualizada');
+    const aprovadores = reuniao.participantes
+      .filter((p) => p.presenca?.situacao === SituacaoPresenca.CONFIRMADA)
+      .map((p) => p.usuario_id);
+    if (!aprovadores.length)
+      throw new BadRequestException(
+        'Confirme ao menos uma presença antes de enviar a ata',
+      );
+    return this.gravarAta(
+      reuniao,
+      {
+        conteudo: ata.conteudo,
+        versao: ata.versao,
+        autor_id: ata.autor_id,
+        situacao: 'EM_APROVACAO',
+        atualizada_em: new Date(),
+        aprovadores,
+        aprovacoes: [],
+      },
+      usuarioId,
+    );
+  }
+
+  async aprovarAta(id: string, versao: number, usuarioId: string) {
+    const { reuniao } = await this.carregar(id, usuarioId);
+    this.exigirEncerrada(reuniao);
+    const ata = reuniao.ata;
+    if (!ata || ata.versao !== versao)
+      throw new ConflictException(
+        'Atualize para consultar a versão atual da ata',
+      );
+    if (!ata.aprovadores.some((id) => id.toString() === usuarioId))
+      throw new ForbiddenException(
+        'Você não está entre os aprovadores desta ata',
+      );
+    if (ata.aprovacoes.some((id) => id.toString() === usuarioId))
+      return this.buscarPorId(id, usuarioId);
+    if (ata.situacao !== 'EM_APROVACAO')
+      throw new BadRequestException('A ata não está em aprovação');
+    const aprovacoes = [...ata.aprovacoes, new Types.ObjectId(usuarioId)];
+    return this.gravarAta(
+      reuniao,
+      {
+        conteudo: ata.conteudo,
+        versao: ata.versao,
+        autor_id: ata.autor_id,
+        situacao:
+          aprovacoes.length === ata.aprovadores.length
+            ? 'APROVADA'
+            : 'EM_APROVACAO',
+        atualizada_em: new Date(),
+        aprovadores: [...ata.aprovadores],
+        aprovacoes,
+      },
+      usuarioId,
+    );
+  }
+
+  async gerarListaPresenca(id: string, usuarioId: string) {
+    const { reuniao } = await this.carregar(id, usuarioId);
+    const pessoas = await this.usuarioModel
+      .find({ _id: { $in: reuniao.participantes.map((p) => p.usuario_id) } })
+      .select('nome')
+      .exec();
+    return {
+      reuniao_id: reuniao._id,
+      titulo: reuniao.titulo,
+      inicio: reuniao.inicio,
+      fim: reuniao.fim,
+      gerada_em: new Date(),
+      participantes: reuniao.participantes.map((p) => ({
+        usuario_id: p.usuario_id,
+        nome:
+          pessoas.find((u) => u._id.toString() === p.usuario_id.toString())
+            ?.nome ?? 'Usuário indisponível',
+        convite: p.convite,
+        situacao: p.presenca?.situacao ?? 'SEM_REGISTRO',
+        entrada: p.presenca?.entrada ?? null,
+        saida: p.presenca?.saida ?? null,
+        minutos: p.presenca?.saida
+          ? Math.max(
+              0,
+              Math.floor(
+                (p.presenca.saida.getTime() - p.presenca.entrada.getTime()) /
+                  60000,
+              ),
+            )
+          : null,
+      })),
+    };
   }
 }

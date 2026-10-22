@@ -126,7 +126,7 @@ describe('Login com Google', () => {
   const mockFetch = vi.fn();
   global.fetch = mockFetch;
 
-  function prepararGoogleService(usuario: UsuarioDocument | null, sobrescreverFetch = true) {
+  function prepararGoogleService(usuario: UsuarioDocument | null, _sobrescreverFetch = true) {
     const model = {
       findOne: vi.fn((query: any) => {
         if (query.googleId) {
@@ -150,6 +150,7 @@ describe('Login com Google', () => {
     };
     const jwt = { sign: vi.fn().mockReturnValue('jwt-token-google') };
     const config = {
+      get: vi.fn((key: string) => key === 'GOOGLE_CLIENT_SECRET' ? 'client-secret-teste' : undefined),
       getOrThrow: vi.fn((key: string) => {
         if (key === 'GOOGLE_CLIENT_ID') return 'client-id-teste';
         if (key === 'GOOGLE_CLIENT_SECRET') return 'client-secret-teste';
@@ -364,7 +365,7 @@ describe('Login com Google', () => {
       provedorAutenticacao: ProvedorAutenticacao.GOOGLE,
       ativo: false,
     };
-    const { service, model } = prepararGoogleService(usuarioDesativado);
+    const { service } = prepararGoogleService(usuarioDesativado);
 
     mockFetch
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id_token: 'id-token' }) })

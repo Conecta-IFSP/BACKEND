@@ -173,6 +173,35 @@ describe('Regras de reuniões', () => {
     expect(resultado.sou_dono).toBe(true);
   });
 
+  it('lista vazia convida somente o organizador, sem incluir toda a comissão', async () => {
+    const { service, reunioes } = preparar();
+    await service.criar({ ...novaReuniao, convidados_ids: [] }, responsavelId);
+    expect(reunioes.create).toHaveBeenCalledWith(expect.objectContaining({ participantes: [
+      { usuario_id: new Types.ObjectId(responsavelId), convite: RespostaConvite.ACEITO },
+    ] }));
+  });
+
+  it('seleciona convidados e mantém organizador único mesmo se enviado explicitamente', async () => {
+    const { service, reunioes } = preparar();
+    await service.criar({ ...novaReuniao, convidados_ids: [membroId, responsavelId] }, responsavelId);
+    const dados = reunioes.create.mock.calls[0][0] as { participantes: { usuario_id: Types.ObjectId }[] };
+    expect(dados.participantes.map((p) => p.usuario_id.toString())).toEqual([responsavelId, membroId]);
+  });
+
+  it('rejeita pessoa de fora da comissão sem gravar reunião', async () => {
+    const { service, reunioes } = preparar();
+    await expect(service.criar({ ...novaReuniao, convidados_ids: [externoId] }, responsavelId)).rejects.toBeInstanceOf(BadRequestException);
+    expect(reunioes.create).not.toHaveBeenCalled();
+  });
+
+  it('valida lista de convidados: não aceita null, IDs inválidos nem duplicados', async () => {
+    for (const convidados_ids of [null, ['invalido'], [membroId, membroId], membroId]) {
+      const erros = await validate(plainToInstance(CreateReuniaoDto, { ...novaReuniao, convidados_ids }));
+      expect(erros.some((e) => e.property === 'convidados_ids')).toBe(true);
+    }
+    expect(await validate(plainToInstance(CreateReuniaoDto, { ...novaReuniao, convidados_ids: [] }))).toHaveLength(0);
+  });
+
   it.each([
     ['membro comum', { papel: PapelComissao.MEMBRO }, ForbiddenException],
     ['comissão inativa', { comissaoAtiva: false }, BadRequestException],

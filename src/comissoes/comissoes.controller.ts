@@ -10,13 +10,17 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard, type RequisicaoAutenticada } from '../auth/jwt-auth.guard.js';
+import {
+  JwtAuthGuard,
+  type RequisicaoAutenticada,
+} from '../auth/jwt-auth.guard.js';
 import { UsuarioComumGuard } from '../auth/admin-sistema.guard.js';
 import { ComissoesService } from './comissoes.service.js';
 import { CreateComissaoDto } from './dto/create-comissao.dto.js';
 import { UpdateComissaoDto } from './dto/update-comissao.dto.js';
 import { AddMembroComissaoDto } from './dto/add-membro-comissao.dto.js';
 import { UpdateMembroComissaoDto } from './dto/update-membro-comissao.dto.js';
+import { DefinirResponsavelDto } from './dto/definir-responsavel.dto.js';
 
 @UseGuards(JwtAuthGuard, UsuarioComumGuard)
 @Controller('comissoes')
@@ -88,6 +92,19 @@ export class ComissoesController {
       id,
       usuarioId,
       dto.papel,
+      req.usuario.sub,
+    );
+  }
+
+  @Patch(':id/responsavel')
+  definirResponsavel(
+    @Param('id') id: string,
+    @Body() dto: DefinirResponsavelDto,
+    @Req() req: RequisicaoAutenticada,
+  ) {
+    return this.comissoesService.definirResponsavel(
+      id,
+      dto.usuario_id,
       req.usuario.sub,
     );
   }
