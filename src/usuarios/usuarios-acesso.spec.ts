@@ -9,7 +9,6 @@ import { AuthService } from '../auth/auth.service.js';
 import { Usuario, TipoUsuario } from './schemas/usuario.schema.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { AdminSistemaGuard } from '../auth/admin-sistema.guard.js';
-import { AuthService } from '../auth/auth.service.js';
 
 describe('Permissões atuais com token antigo', () => {
   let app: INestApplication;

@@ -169,7 +169,7 @@ export class ReunioesService {
       local: dto.local,
       inicio,
       fim,
-      pauta: dto.pauta ?? [],
+      pauta: dto.pauta ?? '',
       criada_por: new Types.ObjectId(usuarioId),
       situacao: SituacaoReuniao.AGENDADA,
       participantes: comissao.membros.map((membro) => ({

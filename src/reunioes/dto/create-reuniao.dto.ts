@@ -1,7 +1,5 @@
 import { Transform } from 'class-transformer';
 import {
-  ArrayMaxSize,
-  IsArray,
   IsISO8601,
   IsMongoId,
   IsOptional,
@@ -32,16 +30,8 @@ export class CreateReuniaoDto {
   fim: string;
 
   @IsOptional()
-  @Transform(({ value }) =>
-    Array.isArray(value)
-      ? value
-          .map((item) => (typeof item === 'string' ? item.trim() : item))
-          .filter((item) => item !== '')
-      : value,
-  )
-  @IsArray()
-  @ArrayMaxSize(30, { message: 'A pauta pode ter até 30 itens' })
-  @IsString({ each: true })
-  @MaxLength(200, { each: true, message: 'Cada item da pauta deve ter até 200 caracteres' })
-  pauta?: string[];
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString({ message: 'A pauta deve ser um texto' })
+  @MaxLength(2000, { message: 'A pauta deve ter até 2000 caracteres' })
+  pauta?: string;
 }

@@ -65,6 +65,7 @@ export class OrganizacoesService {
 
     const dados = {
       nome,
+      cidade: createOrganizacaoDto.cidade.trim(),
       descricao: createOrganizacaoDto.descricao?.trim() || undefined,
       criada_por: new Types.ObjectId(usuarioId),
       status: StatusOrganizacao.PENDENTE,
@@ -152,7 +153,7 @@ export class OrganizacoesService {
         'membros.usuario_id': new Types.ObjectId(usuarioId),
         ...porNome,
       })
-      .select('nome descricao status membros')
+      .select('nome cidade descricao status membros')
       .sort({ criado_em: -1 })
       .lean()
       .exec();
@@ -165,6 +166,7 @@ export class OrganizacoesService {
       return {
         _id: organizacao._id,
         nome: organizacao.nome,
+        cidade: organizacao.cidade,
         descricao: organizacao.descricao,
         status: organizacao.status,
         meu_vinculo: meuVinculo
@@ -208,6 +210,10 @@ export class OrganizacoesService {
 
     if (dados.descricao !== undefined) {
       dados.descricao = dados.descricao.trim();
+    }
+
+    if (dados.cidade !== undefined) {
+      dados.cidade = dados.cidade.trim();
     }
 
     const organizacao = await this.organizacaoModel

@@ -3,11 +3,10 @@ import { AuthService } from './auth.service.js';
 import { getModelToken } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { Usuario, ProvedorAutenticacao } from '../usuarios/schemas/usuario.schema.js';
+import { Usuario, ProvedorAutenticacao, UsuarioDocument } from '../usuarios/schemas/usuario.schema.js';
 import { UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { Model } from 'mongoose';
 import * as bcrypt from 'bcrypt';
-import { UsuarioDocument } from '../usuarios/schemas/usuario.schema.js';
 import { LoginDto } from './dto/login.dto.js';
 import { GoogleLoginDto } from './dto/google-login.dto.js';
 

@@ -10,8 +10,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
-import type { RequisicaoAutenticada } from '../auth/jwt-auth.guard.js';
+import { JwtAuthGuard, type RequisicaoAutenticada } from '../auth/jwt-auth.guard.js';
 import { UsuarioComumGuard } from '../auth/admin-sistema.guard.js';
 import { ComissoesService } from './comissoes.service.js';
 import { CreateComissaoDto } from './dto/create-comissao.dto.js';

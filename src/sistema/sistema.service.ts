@@ -115,6 +115,7 @@ export class SistemaService {
 
     const organizacao = await this.organizacoes.create({
       nome: 'Organização de Teste',
+      cidade: 'São Paulo',
       descricao: 'Criada para testes.',
       criada_por: membroOrganizacao._id,
       status: StatusOrganizacao.APROVADA,

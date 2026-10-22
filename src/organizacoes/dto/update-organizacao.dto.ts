@@ -10,6 +10,12 @@ export class UpdateOrganizacaoDto {
   nome?: string;
 
   @IsOptional()
+  @IsString({ message: 'Informe a cidade' })
+  @MinLength(2, { message: 'Informe a cidade' })
+  @MaxLength(60, { message: 'A cidade deve ter no máximo 60 caracteres' })
+  cidade?: string;
+
+  @IsOptional()
   @IsString()
   @MaxLength(200)
   descricao?: string;

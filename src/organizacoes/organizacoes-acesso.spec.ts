@@ -261,12 +261,27 @@ describe('Rotas autenticadas de organizações', () => {
     await request(app.getHttpServer())
       .post('/organizacoes')
       .auth(token, { type: 'bearer' })
-      .send({ nome: 'Minha organização', criada_por: orgId, status: 'APROVADA' })
+      .send({ nome: 'Minha organização', cidade: 'São Paulo', criada_por: orgId, status: 'APROVADA' })
       .expect(201);
     expect(service.criar).toHaveBeenCalledWith(
-      { nome: 'Minha organização' },
+      { nome: 'Minha organização', cidade: 'São Paulo' },
       usuarioId,
     );
+  });
+
+  it('criação exige a cidade', async () => {
+    const servidor = app.getHttpServer();
+    await request(servidor)
+      .post('/organizacoes')
+      .auth(token, { type: 'bearer' })
+      .send({ nome: 'Minha organização' })
+      .expect(400);
+    await request(servidor)
+      .post('/organizacoes')
+      .auth(token, { type: 'bearer' })
+      .send({ nome: 'Minha organização', cidade: 'X'.repeat(61) })
+      .expect(400);
+    expect(service.criar).not.toHaveBeenCalled();
   });
 
   it('encaminha a identidade para a verificação do administrador da organização', async () => {

@@ -85,7 +85,7 @@ const novaReuniao = {
   local: 'Sala do CA',
   inicio: '2026-10-17T17:00:00.000Z',
   fim: '2026-10-17T18:00:00.000Z',
-  pauta: ['Despesas do mês'],
+  pauta: 'Despesas do mês',
 };
 
 describe('Regras de reuniões', () => {
@@ -130,7 +130,7 @@ describe('Regras de reuniões', () => {
       local: 'Sala do CA',
       inicio: INICIO,
       fim: FIM,
-      pauta: ['Despesas do mês'],
+      pauta: 'Despesas do mês',
       criada_por: new Types.ObjectId(responsavelId),
       situacao,
       participantes: participantes ?? [
@@ -380,12 +380,27 @@ describe('Regras de reuniões', () => {
       local: ' ',
       inicio: '16/10',
       fim: '',
-      pauta: ['  Despesas  ', ''],
+      pauta: '  Despesas do mês\nPróximos passos  ',
     });
     const campos = (await validate(dto)).map((erro) => erro.property);
     expect(campos).toEqual(
       expect.arrayContaining(['comissao_id', 'titulo', 'local', 'inicio', 'fim']),
     );
-    expect(dto.pauta).toEqual(['Despesas']);
+    expect(campos).not.toContain('pauta');
+    expect(dto.pauta).toBe('Despesas do mês\nPróximos passos');
+  });
+
+  it('recusa pauta em lista ou maior que 2000 caracteres', async () => {
+    const base = {
+      comissao_id: comissaoId,
+      titulo: 'Reunião',
+      local: 'Sala',
+      inicio: '2026-10-17T15:00:00.000Z',
+      fim: '2026-10-17T16:00:00.000Z',
+    };
+    for (const pauta of [['Item'], 'x'.repeat(2001)]) {
+      const campos = (await validate(plainToInstance(CreateReuniaoDto, { ...base, pauta }))).map((erro) => erro.property);
+      expect(campos).toEqual(['pauta']);
+    }
   });
 });

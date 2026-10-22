@@ -80,6 +80,12 @@ export class Organizacao {
   })
   nome: string;
 
+  @Prop({
+    required: true,
+    trim: true,
+  })
+  cidade: string;
+
   @Prop()
   descricao?: string;
 

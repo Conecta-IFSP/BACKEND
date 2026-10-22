@@ -107,10 +107,11 @@ export class Reuniao {
   fim: Date;
 
   @Prop({
-    type: [String],
-    default: [],
+    type: String,
+    default: '',
+    trim: true,
   })
-  pauta: string[];
+  pauta: string;
 
   @Prop({
     type: Types.ObjectId,

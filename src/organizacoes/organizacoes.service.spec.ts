@@ -11,8 +11,7 @@ import {
   StatusMembroOrganizacao,
   StatusOrganizacao,
 } from './schemas/organizacao.schema.js';
-import { UsuarioDocument } from '../usuarios/schemas/usuario.schema.js';
-import { TipoUsuario } from '../usuarios/schemas/usuario.schema.js';
+import { TipoUsuario, UsuarioDocument } from '../usuarios/schemas/usuario.schema.js';
 import { ComissaoDocument } from '../comissoes/schemas/comissao.schema.js';
 
 const admin = new Types.ObjectId().toString();
@@ -155,7 +154,7 @@ describe('Permissões e solicitações de organizações', () => {
   });
 
   it('cria organização pendente com o administrador identificado pela sessão', async () => {
-    await service.criar({ nome: 'Organização A' }, admin);
+    await service.criar({ nome: 'Organização A', cidade: 'São Paulo' }, admin);
     expect(model.create).toHaveBeenCalledWith(
       expect.objectContaining({
         status: StatusOrganizacao.PENDENTE,
@@ -173,12 +172,12 @@ describe('Permissões e solicitações de organizações', () => {
   it('cria com outro código quando o sorteado já existe', async () => {
     const repetido = Object.assign(new Error('duplicado'), { code: 11000, keyPattern: { codigo_acesso: 1 } });
     model.create.mockRejectedValueOnce(repetido).mockResolvedValueOnce({ nome: 'Organização A' });
-    await expect(service.criar({ nome: 'Organização A' }, admin)).resolves.toEqual({ nome: 'Organização A' });
+    await expect(service.criar({ nome: 'Organização A', cidade: 'São Paulo' }, admin)).resolves.toEqual({ nome: 'Organização A' });
     expect(model.create).toHaveBeenCalledTimes(2);
 
     const nomeRepetido = Object.assign(new Error('duplicado'), { code: 11000, keyPattern: { nome: 1 } });
     model.create.mockRejectedValueOnce(nomeRepetido);
-    await expect(service.criar({ nome: 'Organização B' }, admin)).rejects.toBe(nomeRepetido);
+    await expect(service.criar({ nome: 'Organização B', cidade: 'São Paulo' }, admin)).rejects.toBe(nomeRepetido);
   });
 
   describe('código de acesso', () => {
@@ -261,7 +260,7 @@ describe('Permissões e solicitações de organizações', () => {
       'membros.usuario_id': new Types.ObjectId(usuario),
     });
     expect(query.select).toHaveBeenCalledWith(
-      'nome descricao status membros',
+      'nome cidade descricao status membros',
     );
     expect(lista[0]).toEqual({
       _id: orgId,
@@ -342,7 +341,7 @@ describe('Permissões e solicitações de organizações', () => {
     model.exists.mockReturnValue(consulta({ _id: orgId }));
 
     await expect(
-      service.criar({ nome: '  Organização A  ' }, admin),
+      service.criar({ nome: '  Organização A  ', cidade: 'São Paulo' }, admin),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(model.create).not.toHaveBeenCalled();
   });

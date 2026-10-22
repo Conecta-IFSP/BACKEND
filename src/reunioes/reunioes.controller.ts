@@ -9,8 +9,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
-import type { RequisicaoAutenticada } from '../auth/jwt-auth.guard.js';
+import { JwtAuthGuard, type RequisicaoAutenticada } from '../auth/jwt-auth.guard.js';
 import { UsuarioComumGuard } from '../auth/admin-sistema.guard.js';
 import { ReunioesService } from './reunioes.service.js';
 import { CreateReuniaoDto } from './dto/create-reuniao.dto.js';
