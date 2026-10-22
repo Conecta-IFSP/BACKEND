@@ -72,6 +72,9 @@ export class Usuario {
   reset_senha_expira_em?: Date;
 
   @Prop({ select: false })
+  reset_senha_codigo_hash?: string;
+
+  @Prop({ select: false })
   verificacao_email_codigo_hash?: string;
 
   @Prop({ select: false })

@@ -8,6 +8,7 @@ import { RecuperarContaDto } from './dto/recuperar-conta.dto.js';
 import { RedefinirSenhaDto } from './dto/redefinir-senha.dto.js';
 import { VerificarCadastroDto } from './dto/verificar-cadastro.dto.js';
 import { GoogleLoginDto } from './dto/google-login.dto.js';
+import { VerificarRecuperacaoDto } from './dto/verificar-recuperacao.dto.js';
 
 @Controller('auth')
 export class AuthController {
@@ -29,6 +30,11 @@ export class AuthController {
   @Post('recuperar-conta')
   recuperarConta(@Body() recuperarContaDto: RecuperarContaDto) {
     return this.authService.solicitarRecuperacao(recuperarContaDto);
+  }
+
+  @Post('verificar-recuperacao')
+  verificarRecuperacao(@Body() dto: VerificarRecuperacaoDto) {
+    return this.authService.verificarRecuperacao(dto);
   }
 
   @Post('redefinir-senha')

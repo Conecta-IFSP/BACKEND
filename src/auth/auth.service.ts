@@ -21,6 +21,7 @@ import { RecuperarContaDto } from './dto/recuperar-conta.dto.js';
 import { RedefinirSenhaDto } from './dto/redefinir-senha.dto.js';
 import { VerificarCadastroDto } from './dto/verificar-cadastro.dto.js';
 import { GoogleLoginDto } from './dto/google-login.dto.js';
+import { VerificarRecuperacaoDto } from './dto/verificar-recuperacao.dto.js';
 
 const DURACAO_TOKEN_RECUPERACAO_MS = 30 * 60 * 1000;
 const DURACAO_CODIGO_VERIFICACAO_MS = 30 * 60 * 1000;
@@ -28,6 +29,8 @@ const CARACTERES_CODIGO = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 @Injectable()
 export class AuthService {
+  private transportador?: Transporter;
+
   constructor(
     @InjectModel(Usuario.name)
     private readonly usuarioModel: Model<UsuarioDocument>,
@@ -382,26 +385,47 @@ export class AuthService {
       return { mensagem };
     }
 
-    const token = randomBytes(32).toString('hex');
-    usuario.reset_senha_token_hash = this.hashToken(token);
+    const codigo = this.gerarCodigoVerificacao();
+    usuario.reset_senha_token_hash = undefined;
+    usuario.reset_senha_codigo_hash = this.hashToken(codigo);
     usuario.reset_senha_expira_em = new Date(Date.now() + DURACAO_TOKEN_RECUPERACAO_MS);
     await usuario.save();
-
-    const link = this.criarLinkDoEmail(token, recuperarContaDto.redirect_url);
 
     await this.criarTransportador().sendMail({
       from: this.configService.get<string>('MAIL_FROM') ?? 'Conecta+ <nao-responda@conectamais.local>',
       to: usuario.email,
       subject: 'Recuperação de conta do Conecta+',
-      text: `Olá, ${usuario.nome}. Use este link para criar uma nova senha: ${link}. O link expira em 30 minutos.`,
-      html: `<p>Olá, ${usuario.nome}.</p><p>Use o botão abaixo para criar uma nova senha:</p><p><a href="${link}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#256ef1;color:#ffffff;text-decoration:none;font-weight:600">Redefinir minha senha</a></p><p>Se o botão não abrir, copie este endereço no navegador:</p><p><a href="${link}">${link}</a></p><p>O link expira em 30 minutos.</p>`,
+      text: `Olá, ${usuario.nome}. Seu código de recuperação é ${codigo.slice(0, 3)}-${codigo.slice(3)}. Ele expira em 30 minutos.`,
+      html: `<p>Olá, ${usuario.nome}.</p><p>Use este código para criar uma nova senha:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">${codigo.slice(0, 3)}-${codigo.slice(3)}</p><p>O código expira em 30 minutos.</p>`,
     });
 
     if (!this.smtpConfigurado()) {
-      console.log(`[desenvolvimento] Link de recuperação para ${usuario.email}: ${link}`);
+      console.log(`[desenvolvimento] Código de recuperação para ${usuario.email}: ${codigo.slice(0, 3)}-${codigo.slice(3)}`);
     }
 
     return { mensagem };
+  }
+
+  async verificarRecuperacao(dto: VerificarRecuperacaoDto) {
+    const email = dto.email.toLowerCase().trim();
+    const codigo = dto.codigo.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const usuario = await this.usuarioModel
+      .findOne({ email, ativo: true })
+      .select('+reset_senha_codigo_hash +reset_senha_expira_em')
+      .exec();
+
+    if (!usuario || codigo.length !== 7 ||
+      usuario.reset_senha_codigo_hash !== this.hashToken(codigo) ||
+      !usuario.reset_senha_expira_em || usuario.reset_senha_expira_em <= new Date()) {
+      throw new BadRequestException('O código de recuperação é inválido ou expirou');
+    }
+
+    const token = randomBytes(32).toString('hex');
+    usuario.reset_senha_token_hash = this.hashToken(token);
+    usuario.reset_senha_codigo_hash = undefined;
+    await usuario.save();
+
+    return { token };
   }
 
   async redefinirSenha(redefinirSenhaDto: RedefinirSenhaDto) {
@@ -524,21 +548,30 @@ export class AuthService {
   }
 
   private criarTransportador(): Transporter {
+    if (this.transportador) return this.transportador;
+
     const host = this.configService.get<string>('MAIL_HOST');
 
     if (!host || !this.smtpConfigurado()) {
-      return nodemailer.createTransport({ jsonTransport: true });
+      this.transportador = nodemailer.createTransport({ jsonTransport: true });
+      return this.transportador;
     }
 
     const port = Number(this.configService.get<string>('MAIL_PORT') ?? 587);
     const usuario = this.configService.get<string>('MAIL_USER');
     const senha = this.configService.get<string>('MAIL_PASS');
 
-    return nodemailer.createTransport({
+    this.transportador = nodemailer.createTransport({
       host,
       port,
       secure: port === 465,
       auth: usuario && senha ? { user: usuario, pass: senha } : undefined,
+      // Evita que a tela fique aguardando indefinidamente quando o SMTP
+      // estiver indisponível ou quando a autenticação do Gmail falhar.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
     });
+    return this.transportador;
   }
 }
