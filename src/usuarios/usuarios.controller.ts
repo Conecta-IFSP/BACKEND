@@ -16,6 +16,8 @@ import { CreateUsuarioDto } from './dto/create-usuario.dto.js';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto.js';
 import { AtualizarPerfilDto } from './dto/atualizar-perfil.dto.js';
 import { AlterarSenhaDto } from './dto/alterar-senha.dto.js';
+import { SolicitarAlteracaoEmailDto } from './dto/solicitar-alteracao-email.dto.js';
+import { ConfirmarAlteracaoEmailDto } from './dto/confirmar-alteracao-email.dto.js';
 import { JwtAuthGuard, type RequisicaoAutenticada } from '../auth/jwt-auth.guard.js';
 import { AdminSistemaGuard } from '../auth/admin-sistema.guard.js';
 import { AuthService } from '../auth/auth.service.js';
@@ -63,6 +65,28 @@ export class UsuariosController {
     @Body() atualizarPerfilDto: AtualizarPerfilDto,
   ) {
     return this.usuariosService.atualizarPerfil(requisicao.usuario.sub, atualizarPerfilDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/email/solicitar')
+  solicitarAlteracaoEmail(
+    @Req() requisicao: RequisicaoAutenticada,
+    @Body() dto: SolicitarAlteracaoEmailDto,
+  ) {
+    return this.authService.solicitarAlteracaoEmail(requisicao.usuario.sub, dto.email);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/email/confirmar')
+  confirmarAlteracaoEmail(
+    @Req() requisicao: RequisicaoAutenticada,
+    @Body() dto: ConfirmarAlteracaoEmailDto,
+  ) {
+    return this.authService.confirmarAlteracaoEmail(
+      requisicao.usuario.sub,
+      dto.email,
+      dto.codigo,
+    );
   }
 
   @UseGuards(JwtAuthGuard)

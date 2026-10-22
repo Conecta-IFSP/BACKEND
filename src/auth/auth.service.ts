@@ -303,6 +303,68 @@ export class AuthService {
     return { mensagem: 'Cadastro confirmado com sucesso' };
   }
 
+  async solicitarAlteracaoEmail(id: string, novoEmail: string) {
+    const email = novoEmail.toLowerCase().trim();
+    const usuario = await this.usuarioModel.findById(id).exec();
+
+    if (!usuario) {
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+    if (usuario.email === email) {
+      throw new BadRequestException('Informe um e-mail diferente do atual');
+    }
+
+    const existente = await this.usuarioModel.findOne({ email, _id: { $ne: id } }).exec();
+    if (existente) {
+      throw new BadRequestException('Já existe um usuário com este email');
+    }
+
+    const codigo = this.gerarCodigoVerificacao();
+    usuario.email_pendente = email;
+    usuario.email_pendente_codigo_hash = this.hashToken(codigo);
+    usuario.email_pendente_expira_em = new Date(Date.now() + DURACAO_CODIGO_VERIFICACAO_MS);
+    await usuario.save();
+
+    await this.criarTransportador().sendMail({
+      from: this.configService.get<string>('MAIL_FROM') ?? 'Conecta+ <nao-responda@conectamais.local>',
+      to: email,
+      subject: 'Confirme a alteração do seu e-mail no Conecta+',
+      text: `Seu código de confirmação é ${codigo.slice(0, 3)}-${codigo.slice(3)}. Ele expira em 30 minutos.`,
+      html: `<p>Seu código para confirmar a alteração do e-mail é:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">${codigo.slice(0, 3)}-${codigo.slice(3)}</p><p>O código expira em 30 minutos.</p>`,
+    });
+
+    return { mensagem: 'Enviamos um código de confirmação para o novo e-mail.' };
+  }
+
+  async confirmarAlteracaoEmail(id: string, emailInformado: string, codigoInformado: string) {
+    const email = emailInformado.toLowerCase().trim();
+    const codigo = codigoInformado.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const usuario = await this.usuarioModel
+      .findById(id)
+      .select('+email_pendente +email_pendente_codigo_hash +email_pendente_expira_em')
+      .exec();
+
+    if (!usuario || usuario.email_pendente !== email || codigo.length !== 7 ||
+      usuario.email_pendente_codigo_hash !== this.hashToken(codigo) ||
+      !usuario.email_pendente_expira_em || usuario.email_pendente_expira_em <= new Date()) {
+      throw new BadRequestException('O código de confirmação é inválido ou expirou');
+    }
+
+    const existente = await this.usuarioModel.findOne({ email, _id: { $ne: id } }).exec();
+    if (existente) {
+      throw new BadRequestException('Já existe um usuário com este email');
+    }
+
+    usuario.email = email;
+    usuario.email_verificado = true;
+    usuario.email_pendente = undefined;
+    usuario.email_pendente_codigo_hash = undefined;
+    usuario.email_pendente_expira_em = undefined;
+    await usuario.save();
+
+    return { mensagem: 'E-mail alterado com sucesso', email };
+  }
+
   private gerarCodigoVerificacao() {
     let codigo = '';
     for (let i = 0; i < 7; i++) codigo += CARACTERES_CODIGO[randomBytes(1)[0] % CARACTERES_CODIGO.length];

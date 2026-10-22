@@ -77,6 +77,15 @@ export class Usuario {
   @Prop({ select: false })
   verificacao_email_expira_em?: Date;
 
+  @Prop({ select: false })
+  email_pendente?: string;
+
+  @Prop({ select: false })
+  email_pendente_codigo_hash?: string;
+
+  @Prop({ select: false })
+  email_pendente_expira_em?: Date;
+
   @Prop({ default: true })
   email_verificado: boolean;
 

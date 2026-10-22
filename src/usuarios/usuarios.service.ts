@@ -162,16 +162,9 @@ export class UsuariosService implements OnApplicationBootstrap {
     }
 
     if (atualizarPerfilDto.email) {
-      const email = atualizarPerfilDto.email.toLowerCase().trim();
-      const usuarioComMesmoEmail = await this.usuarioModel
-        .findOne({ email, _id: { $ne: id } })
-        .exec();
-
-      if (usuarioComMesmoEmail) {
-        throw new ConflictException('Já existe um usuário com este email');
-      }
-
-      usuario.email = email;
+      throw new BadRequestException(
+        'A alteração de e-mail deve ser confirmada pelo código enviado ao novo endereço',
+      );
     }
 
     if (atualizarPerfilDto.nome !== undefined) {
