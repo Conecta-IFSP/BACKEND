@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as os from 'node:os';
@@ -14,8 +14,6 @@ import {
 } from '../organizacoes/schemas/organizacao.schema.js';
 import { Comissao, PapelComissao, type ComissaoDocument } from '../comissoes/schemas/comissao.schema.js';
 import { Reuniao, type ReuniaoDocument } from '../reunioes/schemas/reuniao.schema.js';
-
-const SENHA_USUARIO_TESTE = 'Teste@123';
 
 @Injectable()
 export class SistemaService {
@@ -93,22 +91,23 @@ export class SistemaService {
   }
 
   async popularDadosDeTeste() {
-    const senhaHash = await bcrypt.hash(SENHA_USUARIO_TESTE, 10);
+    const configuracao = this.obterConfiguracaoUsuariosTeste();
+    const senhaHash = await bcrypt.hash(configuracao.senha, 10);
 
     const [semVinculo, membroOrganizacao, membroComissao] = await Promise.all([
       this.usuarios.create({
-        nome: 'Usuário Teste Sem Vínculo',
-        email: 'teste.semvinculo@conectamais.com',
+        nome: configuracao.semVinculo.nome,
+        email: configuracao.semVinculo.email,
         senha_hash: senhaHash,
       }),
       this.usuarios.create({
-        nome: 'Usuário Teste Organização',
-        email: 'teste.organizacao@conectamais.com',
+        nome: configuracao.organizacao.nome,
+        email: configuracao.organizacao.email,
         senha_hash: senhaHash,
       }),
       this.usuarios.create({
-        nome: 'Usuário Teste Comissão',
-        email: 'teste.comissao@conectamais.com',
+        nome: configuracao.comissao.nome,
+        email: configuracao.comissao.email,
         senha_hash: senhaHash,
       }),
     ]);
@@ -152,12 +151,42 @@ export class SistemaService {
 
     return {
       status: 'dados_de_teste_criados',
-      senha_padrao: SENHA_USUARIO_TESTE,
       usuarios: [
         { nome: semVinculo.nome, email: semVinculo.email, cenario: 'sem vínculo' },
         { nome: membroOrganizacao.nome, email: membroOrganizacao.email, cenario: 'admin de organização' },
         { nome: membroComissao.nome, email: membroComissao.email, cenario: 'membro de organização e comissão' },
       ],
+    };
+  }
+
+  private obterConfiguracaoUsuariosTeste() {
+    const valor = (chave: string) => process.env[chave]?.trim();
+    const configuracao = {
+      senha: process.env.TEST_USERS_PASSWORD,
+      semVinculo: { nome: valor('TEST_USER_NO_ORG_NAME'), email: valor('TEST_USER_NO_ORG_EMAIL')?.toLowerCase() },
+      organizacao: { nome: valor('TEST_USER_ORG_NAME'), email: valor('TEST_USER_ORG_EMAIL')?.toLowerCase() },
+      comissao: { nome: valor('TEST_USER_COMMISSION_NAME'), email: valor('TEST_USER_COMMISSION_EMAIL')?.toLowerCase() },
+    };
+
+    const ausentes = [
+      ['TEST_USERS_PASSWORD', configuracao.senha],
+      ['TEST_USER_NO_ORG_NAME', configuracao.semVinculo.nome],
+      ['TEST_USER_NO_ORG_EMAIL', configuracao.semVinculo.email],
+      ['TEST_USER_ORG_NAME', configuracao.organizacao.nome],
+      ['TEST_USER_ORG_EMAIL', configuracao.organizacao.email],
+      ['TEST_USER_COMMISSION_NAME', configuracao.comissao.nome],
+      ['TEST_USER_COMMISSION_EMAIL', configuracao.comissao.email],
+    ].filter(([, conteudo]) => !conteudo).map(([chave]) => chave);
+
+    if (ausentes.length > 0) {
+      throw new BadRequestException(`Configure as contas de teste no .env: ${ausentes.join(', ')}`);
+    }
+
+    return configuracao as {
+      senha: string;
+      semVinculo: { nome: string; email: string };
+      organizacao: { nome: string; email: string };
+      comissao: { nome: string; email: string };
     };
   }
 }

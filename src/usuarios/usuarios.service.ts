@@ -24,12 +24,6 @@ import { UpdateUsuarioDto } from './dto/update-usuario.dto.js';
 import { AtualizarPerfilDto } from './dto/atualizar-perfil.dto.js';
 import { AlterarSenhaDto } from './dto/alterar-senha.dto.js';
 
-const ADMIN_PADRAO = {
-  nome: 'Administrador do Sistema',
-  email: 'admin@admin.com',
-  senha: 'Admin@123',
-};
-
 @Injectable()
 export class UsuariosService implements OnApplicationBootstrap {
   constructor(
@@ -38,9 +32,14 @@ export class UsuariosService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap() {
-    const nome = process.env.ROOT_USER_NAME?.trim() || ADMIN_PADRAO.nome;
-    const email = (process.env.ROOT_USER_EMAIL?.trim() || ADMIN_PADRAO.email).toLowerCase();
-    const senha = process.env.ROOT_USER_PASSWORD || ADMIN_PADRAO.senha;
+    const nome = process.env.ROOT_USER_NAME?.trim();
+    const email = process.env.ROOT_USER_EMAIL?.trim().toLowerCase();
+    const senha = process.env.ROOT_USER_PASSWORD;
+
+    if (!nome || !email || !senha) {
+      console.warn('ROOT_USER_NAME, ROOT_USER_EMAIL e ROOT_USER_PASSWORD não foram configurados; administrador inicial não criado.');
+      return;
+    }
 
     const existe = await this.usuarioModel
       .exists({
