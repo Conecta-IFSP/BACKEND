@@ -19,6 +19,7 @@ import { ComissaoDocument, PapelComissao } from '../comissoes/schemas/comissao.s
 import { OrganizacaoDocument } from '../organizacoes/schemas/organizacao.schema.js';
 import { UsuarioDocument } from '../usuarios/schemas/usuario.schema.js';
 import { CreateReuniaoDto } from './dto/create-reuniao.dto.js';
+import { UpdateReuniaoDto } from './dto/update-reuniao.dto.js';
 
 const responsavelId = new Types.ObjectId().toString();
 const membroId = new Types.ObjectId().toString();
@@ -249,26 +250,56 @@ describe('Regras de reuniões', () => {
     );
   });
 
-  it('só quem agendou edita ou cancela', async () => {
+  it('só quem agendou cancela, e só antes do término', async () => {
     const { service, reunioes } = preparar();
     await expect(
       service.atualizar(reuniaoId, { situacao: SituacaoReuniao.CANCELADA }, membroId),
     ).rejects.toBeInstanceOf(ForbiddenException);
     await service.atualizar(reuniaoId, { situacao: SituacaoReuniao.CANCELADA }, responsavelId);
     expect(reunioes.findOneAndUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ situacao: SituacaoReuniao.AGENDADA }),
+      expect.objectContaining({ situacao: SituacaoReuniao.AGENDADA, fim: { $gt: AGORA } }),
       { $set: { situacao: SituacaoReuniao.CANCELADA } },
       expect.anything(),
     );
+    vi.setSystemTime(new Date('2026-10-16T19:00:00.000Z'));
+    const encerrada = preparar();
+    await expect(
+      encerrada.service.atualizar(reuniaoId, { situacao: SituacaoReuniao.CANCELADA }, responsavelId),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(encerrada.reunioes.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it('o convidado aceita ou recusa, mas não em reunião cancelada', async () => {
+  it('a alteração da reunião aceita somente o cancelamento', async () => {
+    const campos = (dados: Record<string, unknown>) =>
+      validate(plainToInstance(UpdateReuniaoDto, dados)).then((erros) => erros.map((erro) => erro.property));
+    expect(await campos({ situacao: SituacaoReuniao.CANCELADA })).toEqual([]);
+    expect(await campos({ titulo: 'Outro título', inicio: '2026-10-17T10:00:00.000Z' })).toEqual(['situacao']);
+    expect(await campos({ situacao: SituacaoReuniao.AGENDADA })).toEqual(['situacao']);
+  });
+
+  it('o convidado aceita ou recusa, exceto o organizador, quem já entrou e em reunião cancelada', async () => {
     const { service, reunioes } = preparar();
     await service.responderConvite(reuniaoId, false, membroId);
     expect(reunioes.findOneAndUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ 'participantes.usuario_id': new Types.ObjectId(membroId) }),
+      expect.objectContaining({
+        participantes: {
+          $elemMatch: { usuario_id: new Types.ObjectId(membroId), presenca: { $exists: false } },
+        },
+      }),
       { $set: { 'participantes.$.convite': RespostaConvite.RECUSADO } },
       expect.anything(),
+    );
+    await expect(service.responderConvite(reuniaoId, false, responsavelId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    const comEntrada = preparar({
+      participantes: [
+        { usuario_id: new Types.ObjectId(responsavelId), convite: RespostaConvite.ACEITO },
+        membroComEntrada,
+      ],
+    });
+    await expect(comEntrada.service.responderConvite(reuniaoId, false, membroId)).rejects.toBeInstanceOf(
+      BadRequestException,
     );
     const cancelada = preparar({ situacao: SituacaoReuniao.CANCELADA });
     await expect(cancelada.service.responderConvite(reuniaoId, true, membroId)).rejects.toBeInstanceOf(
@@ -304,6 +335,19 @@ describe('Regras de reuniões', () => {
       },
       expect.anything(),
     );
+  });
+
+  it('quem recusou o convite não marca entrada', async () => {
+    const { service, reunioes } = preparar({
+      participantes: [
+        { usuario_id: new Types.ObjectId(responsavelId), convite: RespostaConvite.ACEITO },
+        { usuario_id: new Types.ObjectId(membroId), convite: RespostaConvite.RECUSADO },
+      ],
+    });
+    await expect(service.marcarEntrada(reuniaoId, membroId)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(reunioes.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('a entrada vale do início ao término, sem antecedência', async () => {

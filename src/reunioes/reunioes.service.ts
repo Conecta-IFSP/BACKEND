@@ -235,32 +235,18 @@ export class ReunioesService {
   async atualizar(id: string, dto: UpdateReuniaoDto, usuarioId: string) {
     const { reuniao } = await this.carregarComoDono(id, usuarioId);
     this.exigirAgendada(reuniao);
-    const dados: Record<string, unknown> = {};
-    if (dto.titulo !== undefined) dados.titulo = dto.titulo;
-    if (dto.local !== undefined) dados.local = dto.local;
-    if (dto.pauta !== undefined) dados.pauta = dto.pauta;
-    if (dto.situacao !== undefined) dados.situacao = dto.situacao;
-    if (dto.inicio !== undefined || dto.fim !== undefined) {
-      const inicio =
-        dto.inicio !== undefined
-          ? this.lerData(dto.inicio, 'Informe um início válido')
-          : reuniao.inicio;
-      const fim =
-        dto.fim !== undefined
-          ? this.lerData(dto.fim, 'Informe um término válido')
-          : reuniao.fim;
-      this.validarHorario(inicio, fim);
-      dados.inicio = inicio;
-      dados.fim = fim;
-    }
+    const agora = new Date();
+    if (reuniao.fim <= agora)
+      throw new BadRequestException('Esta reunião já terminou');
     const atualizada = await this.reuniaoModel
       .findOneAndUpdate(
         {
           _id: id,
           criada_por: new Types.ObjectId(usuarioId),
           situacao: SituacaoReuniao.AGENDADA,
+          fim: { $gt: agora },
         },
-        { $set: dados },
+        { $set: { situacao: dto.situacao } },
         { returnDocument: 'after', runValidators: true },
       )
       .exec();
@@ -272,16 +258,27 @@ export class ReunioesService {
   }
 
   async responderConvite(id: string, aceito: boolean, usuarioId: string) {
-    const { reuniao } = await this.carregar(id, usuarioId);
+    const { reuniao, participante, dono } = await this.carregar(id, usuarioId);
+    if (dono)
+      throw new ForbiddenException(
+        'Quem agendou a reunião não responde ao convite',
+      );
     this.exigirAgendada(reuniao);
     if (reuniao.fim <= new Date())
       throw new BadRequestException('Esta reunião já terminou');
+    if (!aceito && participante.presenca)
+      throw new BadRequestException('Você já marcou entrada nesta reunião');
     const atualizada = await this.reuniaoModel
       .findOneAndUpdate(
         {
           _id: id,
           situacao: SituacaoReuniao.AGENDADA,
-          'participantes.usuario_id': new Types.ObjectId(usuarioId),
+          participantes: {
+            $elemMatch: {
+              usuario_id: new Types.ObjectId(usuarioId),
+              ...(aceito ? {} : { presenca: { $exists: false } }),
+            },
+          },
         },
         {
           $set: {
@@ -308,6 +305,10 @@ export class ReunioesService {
       throw new BadRequestException('A reunião ainda não começou');
     if (agora > reuniao.fim)
       throw new BadRequestException('Esta reunião já terminou');
+    if (participante.convite === RespostaConvite.RECUSADO)
+      throw new BadRequestException(
+        'Aceite o convite antes de marcar a entrada',
+      );
     if (participante.presenca)
       throw new ConflictException('Sua entrada já foi registrada');
     const atualizada = await this.reuniaoModel
@@ -318,6 +319,7 @@ export class ReunioesService {
           participantes: {
             $elemMatch: {
               usuario_id: new Types.ObjectId(usuarioId),
+              convite: { $ne: RespostaConvite.RECUSADO },
               presenca: { $exists: false },
             },
           },
