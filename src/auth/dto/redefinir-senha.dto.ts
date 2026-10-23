@@ -1,10 +1,10 @@
 import { IsString, MinLength } from 'class-validator';
 
 export class RedefinirSenhaDto {
-  @IsString()
+  @IsString({ message: 'Solicitação de redefinição inválida' })
   token: string;
 
-  @IsString()
-  @MinLength(8)
+  @IsString({ message: 'Informe a nova senha' })
+  @MinLength(8, { message: 'A nova senha deve ter pelo menos 8 caracteres' })
   nova_senha: string;
 }

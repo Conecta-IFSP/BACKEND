@@ -181,13 +181,13 @@ export class UsuariosService implements OnApplicationBootstrap {
   async alterarSenha(id: string, alterarSenhaDto: AlterarSenhaDto) {
     this.validarId(id);
 
-    const usuario = await this.usuarioModel.findById(id).select('+senha_hash +senhaHash').exec();
+    const usuario = await this.usuarioModel.findById(id).select('+senha_hash').exec();
 
     if (!usuario) {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    const hash = usuario.senha_hash ?? usuario.senhaHash;
+    const hash = usuario.senha_hash;
     if (typeof hash !== 'string' || !hash) {
       throw new BadRequestException('Use a recuperação de conta para definir sua senha');
     }

@@ -4,9 +4,9 @@ import { StatusOrganizacao } from '../schemas/organizacao.schema.js';
 
 export class UpdateOrganizacaoDto {
   @IsOptional()
-  @IsString()
-  @MinLength(2)
-  @MaxLength(100)
+  @IsString({ message: 'Informe o nome da organização' })
+  @MinLength(2, { message: 'O nome deve ter pelo menos 2 caracteres' })
+  @MaxLength(100, { message: 'O nome deve ter até 100 caracteres' })
   nome?: string;
 
   @IsOptional()
@@ -16,11 +16,11 @@ export class UpdateOrganizacaoDto {
   cidade?: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(200)
+  @IsString({ message: 'A descrição deve ser um texto' })
+  @MaxLength(200, { message: 'A descrição deve ter até 200 caracteres' })
   descricao?: string;
 
   @IsOptional()
-  @IsEnum(StatusOrganizacao)
+  @IsEnum(StatusOrganizacao, { message: 'Situação deve ser PENDENTE, APROVADA ou REVOGADA' })
   status?: StatusOrganizacao;
 }

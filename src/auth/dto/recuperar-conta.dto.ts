@@ -1,10 +1,6 @@
-import { IsEmail, IsOptional, IsString } from 'class-validator';
+import { IsEmail } from 'class-validator';
 
 export class RecuperarContaDto {
-  @IsEmail()
+  @IsEmail({}, { message: 'Informe um e-mail válido' })
   email: string;
-
-  @IsOptional()
-  @IsString()
-  redirect_url?: string;
 }

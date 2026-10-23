@@ -3,7 +3,9 @@ import { IsBoolean, IsEmail, IsEnum, IsIn, IsString, MaxLength } from 'class-val
 import { PapelOrganizacao, StatusMembroOrganizacao } from '../schemas/organizacao.schema.js';
 
 export class UpdateStatusMembroDto {
-  @IsIn([StatusMembroOrganizacao.APROVADO, StatusMembroOrganizacao.REJEITADO])
+  @IsIn([StatusMembroOrganizacao.APROVADO, StatusMembroOrganizacao.REJEITADO], {
+    message: 'Situação deve ser APROVADO ou REJEITADO',
+  })
   status: StatusMembroOrganizacao;
 }
 

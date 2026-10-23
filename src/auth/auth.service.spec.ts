@@ -86,28 +86,10 @@ describe('Login', () => {
     });
     const resultado = await service.login({ email: ' TESTE@example.com ', senha });
     expect(model.findOne).toHaveBeenCalledWith({ email: 'teste@example.com' });
-    expect(consulta.select).toHaveBeenCalledWith('+senha_hash +senhaHash');
+    expect(consulta.select).toHaveBeenCalledWith('+senha_hash');
     expect(jwt.signAsync).toHaveBeenCalledWith({ sub: 'usuario-teste', email: 'teste@example.com', tipo: 'USUARIO' });
     expect(resultado.access_token).toBe('token-teste');
     expect(resultado.usuario).not.toHaveProperty('senha_hash');
-  });
-
-  it('autentica cadastro antigo sem devolver o hash legado', async () => {
-    const { service } = preparar({
-      _id: 'usuario-antigo', ativo: true, senhaHash: hash,
-    });
-    const resultado = await service.login({ email: 'teste@example.com', senha });
-    expect(resultado.access_token).toBe('token-teste');
-    expect(resultado.usuario).not.toHaveProperty('senhaHash');
-  });
-
-  it('não aceita a senha antiga quando existe uma senha atual', async () => {
-    const { service, jwt } = preparar({
-      ativo: true, senhaHash: hash,
-      senha_hash: await bcrypt.hash('NovaSenha123', 4),
-    });
-    await expect(service.login({ email: 'teste@example.com', senha })).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(jwt.signAsync).not.toHaveBeenCalled();
   });
 });
 
@@ -129,10 +111,10 @@ describe('Login com Google', () => {
   function prepararGoogleService(usuario: UsuarioDocument | null, _sobrescreverFetch = true) {
     const model = {
       findOne: vi.fn((query: any) => {
-        if (query.googleId) {
+        if (query.google_id) {
           return {
             select: vi.fn().mockReturnThis(),
-            exec: vi.fn().mockResolvedValue(usuario && usuario.googleId === query.googleId ? usuario : null),
+            exec: vi.fn().mockResolvedValue(usuario && usuario.google_id === query.google_id ? usuario : null),
           };
         }
         if (query.email) {
@@ -172,20 +154,20 @@ describe('Login com Google', () => {
 
   it('recusa código ausente ou inválido', async () => {
     const { service } = prepararGoogleService(null);
-    await expect(service.loginComGoogle({ code: '', redirectUri: 'http://localhost' } as GoogleLoginDto))
+    await expect(service.loginComGoogle({ code: '', redirect_uri: 'http://localhost' } as GoogleLoginDto))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('recusa redirectUri ausente', async () => {
+  it('recusa redirect_uri ausente', async () => {
     const { service } = prepararGoogleService(null);
-    await expect(service.loginComGoogle({ code: 'code-valido', redirectUri: '' } as GoogleLoginDto))
+    await expect(service.loginComGoogle({ code: 'code-valido', redirect_uri: '' } as GoogleLoginDto))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('recusa quando Google não retorna ID Token', async () => {
     const { service } = prepararGoogleService(null);
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: 'token' }) });
-    await expect(service.loginComGoogle({ code: 'code-valido', redirectUri: 'http://localhost' } as GoogleLoginDto))
+    await expect(service.loginComGoogle({ code: 'code-valido', redirect_uri: 'http://localhost' } as GoogleLoginDto))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -194,7 +176,7 @@ describe('Login com Google', () => {
     mockFetch
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id_token: 'id-token' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ...googlePayload, aud: 'outro-client-id' }) });
-    await expect(service.loginComGoogle({ code: 'code-valido', redirectUri: 'http://localhost' } as GoogleLoginDto))
+    await expect(service.loginComGoogle({ code: 'code-valido', redirect_uri: 'http://localhost' } as GoogleLoginDto))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -203,7 +185,7 @@ describe('Login com Google', () => {
     mockFetch
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id_token: 'id-token' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ...googlePayload, iss: 'https://invalido.com' }) });
-    await expect(service.loginComGoogle({ code: 'code-valido', redirectUri: 'http://localhost' } as GoogleLoginDto))
+    await expect(service.loginComGoogle({ code: 'code-valido', redirect_uri: 'http://localhost' } as GoogleLoginDto))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -212,7 +194,7 @@ describe('Login com Google', () => {
     mockFetch
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id_token: 'id-token' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ...googlePayload, exp: Math.floor(Date.now() / 1000) - 3600 }) });
-    await expect(service.loginComGoogle({ code: 'code-valido', redirectUri: 'http://localhost' } as GoogleLoginDto))
+    await expect(service.loginComGoogle({ code: 'code-valido', redirect_uri: 'http://localhost' } as GoogleLoginDto))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -221,19 +203,19 @@ describe('Login com Google', () => {
     mockFetch
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id_token: 'id-token' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ...googlePayload, email_verified: false }) });
-    await expect(service.loginComGoogle({ code: 'code-valido', redirectUri: 'http://localhost' } as GoogleLoginDto))
+    await expect(service.loginComGoogle({ code: 'code-valido', redirect_uri: 'http://localhost' } as GoogleLoginDto))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('cria novo usuário quando googleId não existe e e-mail não está cadastrado', async () => {
+  it('cria novo usuário quando google_id não existe e e-mail não está cadastrado', async () => {
     const novoUsuario = {
       _id: 'novo-usuario-id',
       nome: googlePayload.name,
       email: googlePayload.email,
-      googleId: googlePayload.sub,
-      avatarUrl: googlePayload.picture,
+      google_id: googlePayload.sub,
+      avatar_url: googlePayload.picture,
       email_verificado: true,
-      provedorAutenticacao: ProvedorAutenticacao.GOOGLE,
+      provedor_autenticacao: ProvedorAutenticacao.GOOGLE,
       senha_hash: undefined,
       tipo: 'USUARIO',
       tema: 'sistema',
@@ -247,32 +229,32 @@ describe('Login com Google', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id_token: 'id-token' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => googlePayload });
 
-    const resultado = await service.loginComGoogle({ code: 'code-valido', redirectUri: 'http://localhost' } as GoogleLoginDto);
+    const resultado = await service.loginComGoogle({ code: 'code-valido', redirect_uri: 'http://localhost' } as GoogleLoginDto);
 
-    expect(model.findOne).toHaveBeenCalledWith({ googleId: googlePayload.sub });
+    expect(model.findOne).toHaveBeenCalledWith({ google_id: googlePayload.sub });
     expect(model.findOne).toHaveBeenCalledWith({ email: googlePayload.email });
     expect(model.create).toHaveBeenCalledWith(expect.objectContaining({
       nome: googlePayload.name,
       email: googlePayload.email,
-      googleId: googlePayload.sub,
-      avatarUrl: googlePayload.picture,
+      google_id: googlePayload.sub,
+      avatar_url: googlePayload.picture,
       email_verificado: true,
-      provedorAutenticacao: ProvedorAutenticacao.GOOGLE,
+      provedor_autenticacao: ProvedorAutenticacao.GOOGLE,
       senha_hash: undefined,
     }));
     expect(jwt.sign).toHaveBeenCalledWith({ sub: 'novo-usuario-id', email: googlePayload.email, tipo: 'USUARIO' });
     expect(resultado.access_token).toBe('jwt-token-google');
   });
 
-  it('loga usuário existente pelo googleId', async () => {
+  it('loga usuário existente pelo google_id', async () => {
     const usuarioExistente = {
       _id: 'usuario-existente',
       nome: 'Nome Antigo',
       email: googlePayload.email,
-      googleId: googlePayload.sub,
-      avatarUrl: 'https://antigo.com/avatar.png',
+      google_id: googlePayload.sub,
+      avatar_url: 'https://antigo.com/avatar.png',
       email_verificado: true,
-      provedorAutenticacao: ProvedorAutenticacao.GOOGLE,
+      provedor_autenticacao: ProvedorAutenticacao.GOOGLE,
       tipo: 'USUARIO',
       tema: 'sistema',
       ativo: true,
@@ -285,25 +267,25 @@ describe('Login com Google', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id_token: 'id-token' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => googlePayload });
 
-    const resultado = await service.loginComGoogle({ code: 'code-valido', redirectUri: 'http://localhost' } as GoogleLoginDto);
+    const resultado = await service.loginComGoogle({ code: 'code-valido', redirect_uri: 'http://localhost' } as GoogleLoginDto);
 
-    expect(model.findOne).toHaveBeenCalledWith({ googleId: googlePayload.sub });
+    expect(model.findOne).toHaveBeenCalledWith({ google_id: googlePayload.sub });
     expect(model.create).not.toHaveBeenCalled();
     expect(usuarioExistente.nome).toBe(googlePayload.name);
-    expect(usuarioExistente.avatarUrl).toBe(googlePayload.picture);
+    expect(usuarioExistente.avatar_url).toBe(googlePayload.picture);
     expect(jwt.sign).toHaveBeenCalled();
     expect(resultado.access_token).toBe('jwt-token-google');
   });
 
-  it('vincula googleId a conta local existente pelo e-mail', async () => {
+  it('vincula google_id a conta local existente pelo e-mail', async () => {
     const usuarioLocal = {
       _id: 'usuario-local',
       nome: 'Usuario Local',
       email: googlePayload.email,
-      googleId: undefined,
-      avatarUrl: undefined,
+      google_id: undefined,
+      avatar_url: undefined,
       email_verificado: true,
-      provedorAutenticacao: ProvedorAutenticacao.LOCAL,
+      provedor_autenticacao: ProvedorAutenticacao.LOCAL,
       senha_hash: 'hash-local',
       tipo: 'USUARIO',
       tema: 'sistema',
@@ -317,28 +299,28 @@ describe('Login com Google', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id_token: 'id-token' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => googlePayload });
 
-    const resultado = await service.loginComGoogle({ code: 'code-valido', redirectUri: 'http://localhost' } as GoogleLoginDto);
+    const resultado = await service.loginComGoogle({ code: 'code-valido', redirect_uri: 'http://localhost' } as GoogleLoginDto);
 
-    expect(model.findOne).toHaveBeenCalledWith({ googleId: googlePayload.sub });
+    expect(model.findOne).toHaveBeenCalledWith({ google_id: googlePayload.sub });
     expect(model.findOne).toHaveBeenCalledWith({ email: googlePayload.email });
     expect(model.create).not.toHaveBeenCalled();
-    expect(usuarioLocal.googleId).toBe(googlePayload.sub);
-    expect(usuarioLocal.provedorAutenticacao).toBe(ProvedorAutenticacao.AMBOS);
+    expect(usuarioLocal.google_id).toBe(googlePayload.sub);
+    expect(usuarioLocal.provedor_autenticacao).toBe(ProvedorAutenticacao.AMBOS);
     expect(usuarioLocal.nome).toBe(googlePayload.name);
-    expect(usuarioLocal.avatarUrl).toBe(googlePayload.picture);
+    expect(usuarioLocal.avatar_url).toBe(googlePayload.picture);
     expect(jwt.sign).toHaveBeenCalled();
     expect(resultado.access_token).toBe('jwt-token-google');
   });
 
-  it('recusa vincular Google a conta local de outro usuário com mesmo e-mail mas googleId diferente', async () => {
+  it('recusa vincular Google a conta local de outro usuário com mesmo e-mail mas google_id diferente', async () => {
     const usuarioOutroGoogle = {
       _id: 'usuario-outro',
       nome: 'Outro Usuario',
       email: googlePayload.email,
-      googleId: 'outro-google-sub',
-      avatarUrl: undefined,
+      google_id: 'outro-google-sub',
+      avatar_url: undefined,
       email_verificado: true,
-      provedorAutenticacao: ProvedorAutenticacao.GOOGLE,
+      provedor_autenticacao: ProvedorAutenticacao.GOOGLE,
       tipo: 'USUARIO',
       tema: 'sistema',
       ativo: true,
@@ -351,7 +333,7 @@ describe('Login com Google', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id_token: 'id-token' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => googlePayload });
 
-    await expect(service.loginComGoogle({ code: 'code-valido', redirectUri: 'http://localhost' } as GoogleLoginDto))
+    await expect(service.loginComGoogle({ code: 'code-valido', redirect_uri: 'http://localhost' } as GoogleLoginDto))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -360,9 +342,9 @@ describe('Login com Google', () => {
       _id: 'usuario-desativado',
       nome: 'Usuario',
       email: googlePayload.email,
-      googleId: googlePayload.sub,
+      google_id: googlePayload.sub,
       email_verificado: true,
-      provedorAutenticacao: ProvedorAutenticacao.GOOGLE,
+      provedor_autenticacao: ProvedorAutenticacao.GOOGLE,
       ativo: false,
     };
     const { service } = prepararGoogleService(usuarioDesativado);
@@ -371,14 +353,14 @@ describe('Login com Google', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id_token: 'id-token' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => googlePayload });
 
-    await expect(service.loginComGoogle({ code: 'code-valido', redirectUri: 'http://localhost' } as GoogleLoginDto))
+    await expect(service.loginComGoogle({ code: 'code-valido', redirect_uri: 'http://localhost' } as GoogleLoginDto))
       .rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('recusa quando troca de código falha no Google', async () => {
     const { service } = prepararGoogleService(null);
     mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error_description: 'Invalid code' }) });
-    await expect(service.loginComGoogle({ code: 'code-invalido', redirectUri: 'http://localhost' } as GoogleLoginDto))
+    await expect(service.loginComGoogle({ code: 'code-invalido', redirect_uri: 'http://localhost' } as GoogleLoginDto))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 });

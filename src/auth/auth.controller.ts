@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 
@@ -40,15 +40,6 @@ export class AuthController {
   @Post('redefinir-senha')
   redefinirSenha(@Body() redefinirSenhaDto: RedefinirSenhaDto) {
     return this.authService.redefinirSenha(redefinirSenhaDto);
-  }
-
-  @Get('abrir-redefinicao')
-  @Header('Content-Type', 'text/html; charset=utf-8')
-  abrirRedefinicao(
-    @Query('token') token: string,
-    @Query('redirect_url') redirectUrl: string,
-  ) {
-    return this.authService.criarPaginaRedefinicao(token, redirectUrl);
   }
 
   @Get('google/callback')

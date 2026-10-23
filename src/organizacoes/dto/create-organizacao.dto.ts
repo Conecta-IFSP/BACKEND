@@ -1,9 +1,9 @@
 import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class CreateOrganizacaoDto {
-  @IsString()
-  @MinLength(2)
-  @MaxLength(100)
+  @IsString({ message: 'Informe o nome da organização' })
+  @MinLength(2, { message: 'O nome deve ter pelo menos 2 caracteres' })
+  @MaxLength(100, { message: 'O nome deve ter até 100 caracteres' })
   nome: string;
 
   @IsString({ message: 'Informe a cidade' })
@@ -12,7 +12,7 @@ export class CreateOrganizacaoDto {
   cidade: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(200)
+  @IsString({ message: 'A descrição deve ser um texto' })
+  @MaxLength(200, { message: 'A descrição deve ter até 200 caracteres' })
   descricao?: string;
 }

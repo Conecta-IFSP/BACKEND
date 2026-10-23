@@ -1,10 +1,10 @@
 import { IsEmail, IsString, Length } from 'class-validator';
 
 export class VerificarRecuperacaoDto {
-  @IsEmail()
+  @IsEmail({}, { message: 'Informe um e-mail válido' })
   email: string;
 
-  @IsString()
-  @Length(7, 8)
+  @IsString({ message: 'Informe o código' })
+  @Length(7, 8, { message: 'Código inválido' })
   codigo: string;
 }

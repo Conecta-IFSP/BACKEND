@@ -19,8 +19,8 @@ export class ApiKeyGuard implements CanActivate {
     // O navegador envia OPTIONS antes de requisições com X-API-Key.
     if (request.method === 'OPTIONS') return true;
 
-    // Estes endpoints são acessados por redirecionamento direto do Google ou
-    // por links de e-mail, portanto não conseguem enviar cabeçalhos customizados.
+    // Estes endpoints são acessados por redirecionamento direto do Google,
+    // portanto não conseguem enviar cabeçalhos customizados.
     if (this.isPublicBrowserRedirect(request)) return true;
 
     const esperado = this.configService.get<string>('API_ACCESS_TOKEN')?.trim();
@@ -41,7 +41,6 @@ export class ApiKeyGuard implements CanActivate {
     return request.method === 'GET' && [
       '/auth/google/callback',
       '/auth/google/callback-web',
-      '/auth/abrir-redefinicao',
     ].includes(request.path);
   }
 

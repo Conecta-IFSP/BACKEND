@@ -48,9 +48,6 @@ export class Usuario {
   })
   senha_hash?: string;
 
-  @Prop({ select: false })
-  senhaHash?: string;
-
   @Prop({
     type: String,
     enum: TipoUsuario,
@@ -98,17 +95,17 @@ export class Usuario {
   ativo: boolean;
 
   @Prop({ select: false, sparse: true, unique: true })
-  googleId?: string;
+  google_id?: string;
 
   @Prop({
     type: String,
     enum: ProvedorAutenticacao,
     default: ProvedorAutenticacao.LOCAL,
   })
-  provedorAutenticacao: ProvedorAutenticacao;
+  provedor_autenticacao: ProvedorAutenticacao;
 
   @Prop({ select: false })
-  avatarUrl?: string;
+  avatar_url?: string;
 }
 
 export const UsuarioSchema = SchemaFactory.createForClass(Usuario);

@@ -21,13 +21,13 @@ export class CreateReuniaoDto {
   comissao_id: string;
 
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString()
+  @IsString({ message: 'Informe o título' })
   @MinLength(3, { message: 'Informe um título com pelo menos 3 caracteres' })
   @MaxLength(120, { message: 'O título deve ter até 120 caracteres' })
   titulo: string;
 
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString()
+  @IsString({ message: 'Informe o local da reunião' })
   @MinLength(2, { message: 'Informe o local da reunião' })
   @MaxLength(120, { message: 'O local deve ter até 120 caracteres' })
   local: string;

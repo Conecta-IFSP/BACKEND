@@ -1,26 +1,21 @@
 import { IsString, IsNotEmpty, IsOptional, IsIn } from 'class-validator';
 
 export class GoogleLoginDto {
-  @IsString()
+  @IsString({ message: 'Código de autorização inválido' })
   @IsOptional()
   code?: string;
 
-  @IsString()
-  @IsNotEmpty()
-  @IsOptional()
-  redirectUri?: string;
-
-  // Compatibilidade com clientes antigos que enviavam snake_case.
-  @IsString()
+  @IsString({ message: 'Endereço de retorno inválido' })
+  @IsNotEmpty({ message: 'Endereço de retorno inválido' })
   @IsOptional()
   redirect_uri?: string;
 
-  @IsString()
+  @IsString({ message: 'ID Token inválido' })
   @IsOptional()
-  idToken?: string;
+  id_token?: string;
 
-  @IsString()
+  @IsString({ message: 'Plataforma inválida' })
   @IsOptional()
-  @IsIn(['web', 'ios', 'android'])
+  @IsIn(['web', 'ios', 'android'], { message: 'Plataforma deve ser web, ios ou android' })
   plataforma?: 'web' | 'ios' | 'android';
 }

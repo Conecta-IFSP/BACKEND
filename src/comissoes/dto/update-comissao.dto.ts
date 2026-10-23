@@ -9,18 +9,18 @@ import {
 export class UpdateComissaoDto {
   @ValidateIf((_, value) => value !== undefined)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString()
+  @IsString({ message: 'Informe o nome da comissão' })
   @MinLength(2, { message: 'Informe um nome com pelo menos 2 caracteres' })
   @MaxLength(100, { message: 'O nome deve ter até 100 caracteres' })
   nome?: string;
 
   @ValidateIf((_, value) => value !== undefined)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString()
+  @IsString({ message: 'A descrição deve ser um texto' })
   @MaxLength(1000, { message: 'A descrição deve ter até 1000 caracteres' })
   descricao?: string;
 
   @ValidateIf((_, value) => value !== undefined)
-  @IsBoolean()
+  @IsBoolean({ message: 'Informe se a comissão está ativa' })
   ativo?: boolean;
 }
