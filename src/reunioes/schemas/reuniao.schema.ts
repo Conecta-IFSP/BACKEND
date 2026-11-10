@@ -72,6 +72,39 @@ export class Participante {
 
 export const ParticipanteSchema = SchemaFactory.createForClass(Participante);
 
+export enum SituacaoAta {
+  RASCUNHO = 'RASCUNHO',
+  EM_APROVACAO = 'EM_APROVACAO',
+  APROVADA = 'APROVADA',
+  REPROVADA = 'REPROVADA',
+  CANCELADA = 'CANCELADA',
+}
+
+export enum DecisaoAta {
+  APROVADA = 'APROVADA',
+  REPROVADA = 'REPROVADA',
+}
+
+@Schema({ _id: false })
+export class AvaliacaoAta {
+  @Prop({ type: Types.ObjectId, ref: 'Usuario', required: true })
+  usuario_id: Types.ObjectId;
+
+  @Prop({ type: String, enum: DecisaoAta, required: true })
+  decisao: DecisaoAta;
+
+  // Parágrafo da ata apontado por quem reprovou.
+  @Prop({ trim: true, maxlength: 20000 })
+  trecho?: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  justificativa?: string;
+
+  @Prop({ required: true })
+  em: Date;
+}
+export const AvaliacaoAtaSchema = SchemaFactory.createForClass(AvaliacaoAta);
+
 @Schema({ _id: false })
 export class Ata {
   @Prop({ required: true, minlength: 20, maxlength: 20000 })
@@ -80,8 +113,8 @@ export class Ata {
   @Prop({ required: true, min: 1 })
   versao: number;
 
-  @Prop({ required: true, enum: ['RASCUNHO', 'EM_APROVACAO', 'APROVADA'] })
-  situacao: string;
+  @Prop({ type: String, required: true, enum: SituacaoAta })
+  situacao: SituacaoAta;
 
   @Prop({ type: Types.ObjectId, ref: 'Usuario', required: true })
   autor_id: Types.ObjectId;
@@ -89,13 +122,52 @@ export class Ata {
   @Prop({ required: true })
   atualizada_em: Date;
 
+  @Prop()
+  enviada_em?: Date;
+
+  @Prop()
+  prazo?: Date;
+
   @Prop({ type: [Types.ObjectId], default: [] })
   aprovadores: Types.ObjectId[];
 
-  @Prop({ type: [Types.ObjectId], default: [] })
-  aprovacoes: Types.ObjectId[];
+  @Prop({ type: [AvaliacaoAtaSchema], default: [] })
+  avaliacoes: AvaliacaoAta[];
+
+  // Sequencial por comissão e ano, atribuído na aprovação.
+  @Prop({ min: 1 })
+  numero?: number;
+
+  @Prop()
+  ano?: number;
+
+  @Prop()
+  aprovada_em?: Date;
+
+  @Prop()
+  cancelada_em?: Date;
 }
 export const AtaSchema = SchemaFactory.createForClass(Ata);
+
+// O _id do anexo é o id do arquivo guardado no GridFS (bucket "anexos").
+@Schema({ _id: false })
+export class Anexo {
+  @Prop({ type: Types.ObjectId, required: true })
+  _id: Types.ObjectId;
+
+  @Prop({ required: true, trim: true, maxlength: 200 })
+  nome: string;
+
+  @Prop({ required: true })
+  tipo: string;
+
+  @Prop({ required: true, min: 1 })
+  tamanho: number;
+
+  @Prop({ required: true })
+  enviado_em: Date;
+}
+export const AnexoSchema = SchemaFactory.createForClass(Anexo);
 
 @Schema({
   collection: 'reunioes',
@@ -108,6 +180,11 @@ export const AtaSchema = SchemaFactory.createForClass(Ata);
 export class Reuniao {
   @Prop({ type: AtaSchema })
   ata?: Ata;
+
+  // Atas reprovadas que deram lugar a uma nova; a mais recente fica por último.
+  @Prop({ type: [AtaSchema], default: [] })
+  atas_canceladas: Ata[];
+
   @Prop({
     type: Types.ObjectId,
     ref: 'Comissao',
@@ -122,7 +199,8 @@ export class Reuniao {
   titulo: string;
 
   @Prop({
-    required: true,
+    type: String,
+    default: '',
     trim: true,
   })
   local: string;
@@ -132,6 +210,16 @@ export class Reuniao {
 
   @Prop({ required: true })
   fim: Date;
+
+  @Prop({ type: Boolean, default: false })
+  dia_inteiro: boolean;
+
+  // Preenchido quando a data ou o horário mudam; o app usa para pedir nova confirmação ao convidado.
+  @Prop()
+  horario_alterado_em?: Date;
+
+  @Prop({ type: [AnexoSchema], default: [] })
+  anexos: Anexo[];
 
   @Prop({
     type: String,

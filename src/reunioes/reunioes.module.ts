@@ -6,6 +6,7 @@ import { ReunioesController } from './reunioes.controller.js';
 import { ReunioesService } from './reunioes.service.js';
 
 import { Reuniao, ReuniaoSchema } from './schemas/reuniao.schema.js';
+import { Contador, ContadorSchema } from './schemas/contador.schema.js';
 import { Comissao, ComissaoSchema } from '../comissoes/schemas/comissao.schema.js';
 import { Usuario, UsuarioSchema } from '../usuarios/schemas/usuario.schema.js';
 import {
@@ -21,6 +22,7 @@ import {
       { name: Comissao.name, schema: ComissaoSchema },
       { name: Organizacao.name, schema: OrganizacaoSchema },
       { name: Usuario.name, schema: UsuarioSchema },
+      { name: Contador.name, schema: ContadorSchema },
     ]),
   ],
   controllers: [ReunioesController],
