@@ -21,6 +21,7 @@ export enum SituacaoPresenca {
 }
 
 export enum OrigemPresenca {
+  LINK = 'LINK',
   PROPRIO = 'PROPRIO',
   RESPONSAVEL = 'RESPONSAVEL',
 }
@@ -178,6 +179,13 @@ export const AnexoSchema = SchemaFactory.createForClass(Anexo);
   versionKey: false,
 })
 export class Reuniao {
+  @Prop({ default: 0 }) presencas_revisao: number;
+  @Prop({ type: Object, select: false })
+  acesso_presenca?: { hash: string; inicio: Date; fim: Date; responsavel_id: string; criado_em: Date };
+
+  @Prop({ type: [Object], default: [], select: false })
+  historico_presencas: Record<string, unknown>[];
+
   @Prop({ type: AtaSchema })
   ata?: Ata;
 

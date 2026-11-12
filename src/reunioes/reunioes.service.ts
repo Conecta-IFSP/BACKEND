@@ -193,7 +193,8 @@ export class ReunioesService {
     const dados = (
       typeof reuniao.toObject === 'function' ? reuniao.toObject() : reuniao
     ) as Reuniao & { _id: Types.ObjectId };
-    return { ...dados, sou_dono: dados.criada_por.toString() === usuarioId };
+    const { acesso_presenca: _acesso, historico_presencas: _historico, ...publicos } = dados;
+    return { ...publicos, sou_dono: dados.criada_por.toString() === usuarioId };
   }
 
   private async responder(
@@ -455,6 +456,7 @@ export class ReunioesService {
   async marcarEntrada(id: string, usuarioId: string) {
     const { reuniao, participante, dono } = await this.carregar(id, usuarioId);
     this.exigirAgendada(reuniao);
+    if (reuniao.ata && reuniao.ata.situacao !== SituacaoAta.RASCUNHO) throw new BadRequestException('As presenças estão fechadas após o envio da ata');
     const agora = new Date();
     if (agora < reuniao.inicio)
       throw new BadRequestException('A reunião ainda não começou');
@@ -470,6 +472,7 @@ export class ReunioesService {
       .findOneAndUpdate(
         {
           _id: id,
+          ata: reuniao.ata ?? { $exists: false },
           situacao: SituacaoReuniao.AGENDADA,
           participantes: {
             $elemMatch: {
@@ -480,6 +483,7 @@ export class ReunioesService {
           },
         },
         {
+          $inc: { presencas_revisao: 1 },
           $set: {
             'participantes.$.presenca': {
               entrada: agora,
@@ -503,6 +507,7 @@ export class ReunioesService {
   async marcarSaida(id: string, usuarioId: string) {
     const { reuniao, participante } = await this.carregar(id, usuarioId);
     this.exigirAgendada(reuniao);
+    if (reuniao.ata && reuniao.ata.situacao !== SituacaoAta.RASCUNHO) throw new BadRequestException('As presenças estão fechadas após o envio da ata');
     const presenca = participante.presenca;
     if (!presenca || presenca.situacao === SituacaoPresenca.RECUSADA)
       throw new BadRequestException('Marque a entrada antes da saída');
@@ -513,6 +518,7 @@ export class ReunioesService {
       .findOneAndUpdate(
         {
           _id: id,
+          ata: reuniao.ata ?? { $exists: false },
           participantes: {
             $elemMatch: {
               usuario_id: new Types.ObjectId(usuarioId),
@@ -522,6 +528,7 @@ export class ReunioesService {
           },
         },
         {
+          $inc: { presencas_revisao: 1 },
           $set: {
             'participantes.$.presenca.saida':
               agora > reuniao.fim ? reuniao.fim : agora,
@@ -542,6 +549,7 @@ export class ReunioesService {
     this.validarId(participanteId);
     const { reuniao } = await this.carregarComoDono(id, usuarioId);
     this.exigirAgendada(reuniao);
+    if (reuniao.ata && reuniao.ata.situacao !== SituacaoAta.RASCUNHO) throw new BadRequestException('As presenças estão fechadas após o envio da ata');
     if (new Date() < reuniao.inicio)
       throw new BadRequestException('A reunião ainda não começou');
     const alvo = reuniao.participantes.find(
@@ -556,6 +564,7 @@ export class ReunioesService {
       .findOneAndUpdate(
         {
           _id: id,
+          ata: reuniao.ata ?? { $exists: false },
           situacao: SituacaoReuniao.AGENDADA,
           participantes: {
             $elemMatch: {
@@ -565,8 +574,9 @@ export class ReunioesService {
           },
         },
         alvo.presenca
-          ? { $set: { 'participantes.$.presenca.situacao': situacao } }
+          ? { $set: { 'participantes.$.presenca.situacao': situacao }, $inc: { presencas_revisao: 1 } }
           : {
+              $inc: { presencas_revisao: 1 },
               $set: {
                 'participantes.$.presenca': {
                   entrada: reuniao.inicio,
@@ -599,6 +609,7 @@ export class ReunioesService {
       .findOneAndUpdate(
         {
           _id: reuniao._id,
+          ...((reuniao.presencas_revisao ?? 0) === 0 ? { $or: [{ presencas_revisao: 0 }, { presencas_revisao: { $exists: false } }] } : { presencas_revisao: reuniao.presencas_revisao }),
           situacao: SituacaoReuniao.AGENDADA,
           ata: reuniao.ata ?? { $exists: false },
         },
