@@ -32,11 +32,13 @@ import {
   SituacaoAta,
   SituacaoPresenca,
   SituacaoReuniao,
+  SituacaoVotacao,
 } from './schemas/reuniao.schema.js';
-import type { Ata, AvaliacaoAta } from './schemas/reuniao.schema.js';
+import type { Ata, AvaliacaoAta, Votacao } from './schemas/reuniao.schema.js';
 import { Contador, ContadorDocument } from './schemas/contador.schema.js';
 import { CreateReuniaoDto } from './dto/create-reuniao.dto.js';
 import { UpdateReuniaoDto } from './dto/update-reuniao.dto.js';
+import { AbrirVotacaoDto } from './dto/votacao.dto.js';
 import {
   EnviarAtaDto,
   ReprovarAtaDto,
@@ -194,7 +196,38 @@ export class ReunioesService {
       typeof reuniao.toObject === 'function' ? reuniao.toObject() : reuniao
     ) as Reuniao & { _id: Types.ObjectId };
     const { acesso_presenca: _acesso, historico_presencas: _historico, ...publicos } = dados;
-    return { ...publicos, sou_dono: dados.criada_por.toString() === usuarioId };
+    return {
+      ...publicos,
+      votacoes: (dados.votacoes ?? []).map((votacao) =>
+        this.apresentarVotacao(votacao, dados.fim, usuarioId),
+      ),
+      sou_dono: dados.criada_por.toString() === usuarioId,
+    };
+  }
+
+  private apresentarVotacao(votacao: Votacao, fim: Date, usuarioId: string) {
+    const expirou =
+      votacao.situacao === SituacaoVotacao.ABERTA && fim <= new Date();
+    const encerrada =
+      votacao.situacao === SituacaoVotacao.ENCERRADA || expirou;
+    const votos = votacao.votos ?? [];
+    const meu = votos.find((voto) => voto.usuario_id.toString() === usuarioId);
+    return {
+      _id: votacao._id,
+      titulo: votacao.titulo,
+      descricao: votacao.descricao ?? '',
+      opcoes: votacao.opcoes,
+      situacao: encerrada ? SituacaoVotacao.ENCERRADA : SituacaoVotacao.ABERTA,
+      aberta_em: votacao.aberta_em,
+      encerrada_em: votacao.encerrada_em ?? (expirou ? fim : null),
+      total_votos: votos.length,
+      meu_voto: meu ? meu.opcao : null,
+      resultado: encerrada
+        ? votacao.opcoes.map(
+            (_, indice) => votos.filter((voto) => voto.opcao === indice).length,
+          )
+        : null,
+    };
   }
 
   private async responder(
@@ -899,6 +932,184 @@ export class ReunioesService {
           : null,
       })),
     };
+  }
+
+  private async exigirPresidente(reuniao: Reuniao, usuarioId: string) {
+    const comissao = await this.comissaoModel
+      .findById(reuniao.comissao_id)
+      .exec();
+    if (!comissao) throw new NotFoundException('Comissão não encontrada');
+    const presidente = comissao.membros.some(
+      (membro) =>
+        membro.usuario_id.toString() === usuarioId &&
+        membro.papel === PapelComissao.RESPONSAVEL,
+    );
+    if (!presidente)
+      throw new ForbiddenException(
+        'Apenas o responsável da comissão pode gerenciar votações',
+      );
+    if (!comissao.ativo)
+      throw new BadRequestException(
+        'Reative a comissão antes de gerenciar votações',
+      );
+  }
+
+  private buscarVotacao(reuniao: Reuniao, votacaoId: string) {
+    this.validarId(votacaoId);
+    const votacao = (reuniao.votacoes ?? []).find(
+      (item) => item._id?.toString() === votacaoId,
+    );
+    if (!votacao) throw new NotFoundException('Votação não encontrada');
+    return votacao;
+  }
+
+  async abrirVotacao(id: string, dto: AbrirVotacaoDto, usuarioId: string) {
+    const { reuniao } = await this.carregar(id, usuarioId);
+    await this.exigirPresidente(reuniao, usuarioId);
+    this.exigirAgendada(reuniao);
+    const agora = new Date();
+    if (agora < reuniao.inicio)
+      throw new BadRequestException('A reunião ainda não começou');
+    if (agora >= reuniao.fim)
+      throw new BadRequestException('Esta reunião já terminou');
+    const unicas = new Set(dto.opcoes.map((opcao) => opcao.toLowerCase()));
+    if (unicas.size !== dto.opcoes.length)
+      throw new BadRequestException('Não repita opções de voto');
+    const atualizada = await this.reuniaoModel
+      .findOneAndUpdate(
+        {
+          _id: id,
+          situacao: SituacaoReuniao.AGENDADA,
+          fim: { $gt: agora },
+        },
+        {
+          $push: {
+            votacoes: {
+              _id: new Types.ObjectId(),
+              titulo: dto.titulo,
+              descricao: dto.descricao ?? '',
+              opcoes: dto.opcoes,
+              situacao: SituacaoVotacao.ABERTA,
+              aberta_por: new Types.ObjectId(usuarioId),
+              aberta_em: agora,
+              votos: [],
+            },
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    return this.responder(
+      atualizada,
+      usuarioId,
+      'A reunião mudou. Atualize a tela.',
+    );
+  }
+
+  async votar(
+    id: string,
+    votacaoId: string,
+    opcao: number,
+    usuarioId: string,
+  ) {
+    const { reuniao, participante } = await this.carregar(id, usuarioId);
+    this.exigirAgendada(reuniao);
+    const votacao = this.buscarVotacao(reuniao, votacaoId);
+    const agora = new Date();
+    if (votacao.situacao !== SituacaoVotacao.ABERTA || reuniao.fim <= agora)
+      throw new BadRequestException('Esta votação está encerrada');
+    if (opcao >= votacao.opcoes.length)
+      throw new BadRequestException('Opção de voto inválida');
+    const presenca = participante.presenca;
+    if (!presenca || presenca.situacao === SituacaoPresenca.RECUSADA)
+      throw new ForbiddenException('Marque sua entrada na reunião para votar');
+    if (presenca.saida)
+      throw new ForbiddenException(
+        'Você já saiu da reunião e não pode mais votar',
+      );
+    if (votacao.votos.some((voto) => voto.usuario_id.toString() === usuarioId))
+      throw new ConflictException('Você já votou nesta votação');
+    const usuario = new Types.ObjectId(usuarioId);
+    const atualizada = await this.reuniaoModel
+      .findOneAndUpdate(
+        {
+          _id: id,
+          situacao: SituacaoReuniao.AGENDADA,
+          fim: { $gt: agora },
+          votacoes: {
+            $elemMatch: {
+              _id: new Types.ObjectId(votacaoId),
+              situacao: SituacaoVotacao.ABERTA,
+              'votos.usuario_id': { $ne: usuario },
+            },
+          },
+          participantes: {
+            $elemMatch: {
+              usuario_id: usuario,
+              'presenca.situacao': {
+                $in: [SituacaoPresenca.AGUARDANDO, SituacaoPresenca.CONFIRMADA],
+              },
+              'presenca.saida': { $exists: false },
+            },
+          },
+        },
+        {
+          $push: {
+            'votacoes.$[votacao].votos': {
+              usuario_id: usuario,
+              opcao,
+              votado_em: agora,
+            },
+          },
+        },
+        {
+          arrayFilters: [{ 'votacao._id': new Types.ObjectId(votacaoId) }],
+          returnDocument: 'after',
+          runValidators: true,
+        },
+      )
+      .exec();
+    return this.responder(
+      atualizada,
+      usuarioId,
+      'A votação mudou. Atualize a tela.',
+    );
+  }
+
+  async encerrarVotacao(id: string, votacaoId: string, usuarioId: string) {
+    const { reuniao } = await this.carregar(id, usuarioId);
+    await this.exigirPresidente(reuniao, usuarioId);
+    this.exigirAgendada(reuniao);
+    const votacao = this.buscarVotacao(reuniao, votacaoId);
+    if (votacao.situacao !== SituacaoVotacao.ABERTA)
+      throw new BadRequestException('Esta votação já foi encerrada');
+    const agora = new Date();
+    const atualizada = await this.reuniaoModel
+      .findOneAndUpdate(
+        {
+          _id: id,
+          situacao: SituacaoReuniao.AGENDADA,
+          votacoes: {
+            $elemMatch: {
+              _id: new Types.ObjectId(votacaoId),
+              situacao: SituacaoVotacao.ABERTA,
+            },
+          },
+        },
+        {
+          $set: {
+            'votacoes.$.situacao': SituacaoVotacao.ENCERRADA,
+            'votacoes.$.encerrada_em': agora > reuniao.fim ? reuniao.fim : agora,
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    return this.responder(
+      atualizada,
+      usuarioId,
+      'A votação mudou. Atualize a tela.',
+    );
   }
 
   private exigirAnexosAbertos(reuniao: Reuniao) {
