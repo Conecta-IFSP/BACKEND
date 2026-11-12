@@ -25,6 +25,11 @@ export enum OrigemPresenca {
   RESPONSAVEL = 'RESPONSAVEL',
 }
 
+export enum SituacaoVotacao {
+  ABERTA = 'ABERTA',
+  ENCERRADA = 'ENCERRADA',
+}
+
 @Schema({ _id: false })
 export class Presenca {
   @Prop({ required: true })
@@ -97,6 +102,55 @@ export class Ata {
 }
 export const AtaSchema = SchemaFactory.createForClass(Ata);
 
+@Schema({ _id: false })
+export class Voto {
+  @Prop({ type: Types.ObjectId, ref: 'Usuario', required: true })
+  usuario_id: Types.ObjectId;
+
+  @Prop({ required: true, min: 0 })
+  opcao: number;
+
+  @Prop({ required: true })
+  votado_em: Date;
+}
+
+export const VotoSchema = SchemaFactory.createForClass(Voto);
+
+@Schema()
+export class Votacao {
+  _id?: Types.ObjectId;
+
+  @Prop({ required: true, trim: true, minlength: 3, maxlength: 200 })
+  titulo: string;
+
+  @Prop({ type: String, default: '', trim: true, maxlength: 1000 })
+  descricao: string;
+
+  @Prop({ type: [String], required: true })
+  opcoes: string[];
+
+  @Prop({
+    type: String,
+    enum: SituacaoVotacao,
+    default: SituacaoVotacao.ABERTA,
+  })
+  situacao: SituacaoVotacao;
+
+  @Prop({ type: Types.ObjectId, ref: 'Usuario', required: true })
+  aberta_por: Types.ObjectId;
+
+  @Prop({ required: true })
+  aberta_em: Date;
+
+  @Prop()
+  encerrada_em?: Date;
+
+  @Prop({ type: [VotoSchema], default: [] })
+  votos: Voto[];
+}
+
+export const VotacaoSchema = SchemaFactory.createForClass(Votacao);
+
 @Schema({
   collection: 'reunioes',
   timestamps: {
@@ -108,6 +162,10 @@ export const AtaSchema = SchemaFactory.createForClass(Ata);
 export class Reuniao {
   @Prop({ type: AtaSchema })
   ata?: Ata;
+
+  @Prop({ type: [VotacaoSchema], default: [] })
+  votacoes: Votacao[];
+
   @Prop({
     type: Types.ObjectId,
     ref: 'Comissao',

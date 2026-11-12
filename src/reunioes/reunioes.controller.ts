@@ -18,6 +18,7 @@ import { ReunioesService } from './reunioes.service.js';
 import { CreateReuniaoDto } from './dto/create-reuniao.dto.js';
 import { UpdateReuniaoDto } from './dto/update-reuniao.dto.js';
 import { SalvarAtaDto, VersaoAtaDto } from './dto/ata.dto.js';
+import { AbrirVotacaoDto, VotarDto } from './dto/votacao.dto.js';
 import {
   AtualizarPresencaDto,
   ResponderConviteReuniaoDto,
@@ -125,5 +126,42 @@ export class ReunioesController {
     @Req() req: RequisicaoAutenticada,
   ) {
     return this.reunioesService.aprovarAta(id, dto.versao, req.usuario.sub);
+  }
+
+  @Post(':id/votacoes')
+  abrirVotacao(
+    @Param('id') id: string,
+    @Body() dto: AbrirVotacaoDto,
+    @Req() req: RequisicaoAutenticada,
+  ) {
+    return this.reunioesService.abrirVotacao(id, dto, req.usuario.sub);
+  }
+
+  @Post(':id/votacoes/:votacaoId/votos')
+  votar(
+    @Param('id') id: string,
+    @Param('votacaoId') votacaoId: string,
+    @Body() dto: VotarDto,
+    @Req() req: RequisicaoAutenticada,
+  ) {
+    return this.reunioesService.votar(
+      id,
+      votacaoId,
+      dto.opcao,
+      req.usuario.sub,
+    );
+  }
+
+  @Post(':id/votacoes/:votacaoId/encerrar')
+  encerrarVotacao(
+    @Param('id') id: string,
+    @Param('votacaoId') votacaoId: string,
+    @Req() req: RequisicaoAutenticada,
+  ) {
+    return this.reunioesService.encerrarVotacao(
+      id,
+      votacaoId,
+      req.usuario.sub,
+    );
   }
 }

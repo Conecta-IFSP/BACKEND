@@ -46,7 +46,7 @@ export class Usuario {
     required: false,
     select: false,
   })
-  senha_hash?: string;
+  'senha_hash'?: string;
 
   @Prop({
     type: String,
