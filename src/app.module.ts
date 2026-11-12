@@ -9,6 +9,9 @@ import { AuthModule } from './auth/auth.module.js';
 import { SistemaModule } from './sistema/sistema.module.js';
 import { ReunioesModule } from './reunioes/reunioes.module.js';
 import { ApiKeyGuard } from './auth/api-key.guard.js';
+import { RelatoriosModule } from './relatorios/relatorios.module.js';
+import { PresencasModule } from './presencas/presencas.module.js';
+import { NotificacoesModule } from './notificacoes/notificacoes.module.js';
 
 @Module({
   imports: [
@@ -29,6 +32,9 @@ import { ApiKeyGuard } from './auth/api-key.guard.js';
     AuthModule,
     SistemaModule,
     ReunioesModule,
+    RelatoriosModule,
+    PresencasModule,
+    NotificacoesModule,
   ],
   providers: [
     {

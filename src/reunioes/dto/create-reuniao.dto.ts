@@ -2,6 +2,7 @@ import { Transform } from 'class-transformer';
 import {
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsISO8601,
   IsMongoId,
   IsOptional,
@@ -27,16 +28,21 @@ export class CreateReuniaoDto {
   titulo: string;
 
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString({ message: 'Informe o local da reunião' })
-  @MinLength(2, { message: 'Informe o local da reunião' })
+  @ValidateIf((_, value) => value !== undefined && value !== '')
+  @IsString({ message: 'O local deve ser um texto' })
+  @MinLength(2, { message: 'O local deve ter pelo menos 2 caracteres' })
   @MaxLength(120, { message: 'O local deve ter até 120 caracteres' })
-  local: string;
+  local?: string;
 
   @IsISO8601({ strict: true }, { message: 'Informe um início válido' })
   inicio: string;
 
   @IsISO8601({ strict: true }, { message: 'Informe um término válido' })
   fim: string;
+
+  @IsOptional()
+  @IsBoolean({ message: 'Informe se a reunião dura o dia inteiro' })
+  dia_inteiro?: boolean;
 
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))

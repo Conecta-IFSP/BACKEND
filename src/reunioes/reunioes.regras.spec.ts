@@ -4,10 +4,11 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
-import { Model, Types } from 'mongoose';
+import { type Connection, Model, Types } from 'mongoose';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ReunioesService } from './reunioes.service.js';
+import type { ContadorDocument } from './schemas/contador.schema.js';
 import {
   OrigemPresenca,
   RespostaConvite,
@@ -68,6 +69,9 @@ type Opcoes = {
   usuarioAtivo?: boolean;
   participantes?: ParticipanteTeste[];
   situacao?: SituacaoReuniao;
+  inicio?: Date;
+  fim?: Date;
+  atualizadoEm?: Date;
 };
 
 const membroComEntrada: ParticipanteTeste = {
@@ -106,6 +110,9 @@ describe('Regras de reuniões', () => {
     usuarioAtivo = true,
     participantes,
     situacao = SituacaoReuniao.AGENDADA,
+    inicio = INICIO,
+    fim = FIM,
+    atualizadoEm,
   }: Opcoes = {}) {
     const comissao = {
       _id: new Types.ObjectId(comissaoId),
@@ -129,11 +136,12 @@ describe('Regras de reuniões', () => {
       comissao_id: new Types.ObjectId(comissaoId),
       titulo: 'Fechamento do orçamento',
       local: 'Sala do CA',
-      inicio: INICIO,
-      fim: FIM,
+      inicio,
+      fim,
       pauta: 'Despesas do mês',
       criada_por: new Types.ObjectId(responsavelId),
       situacao,
+      ...(atualizadoEm ? { atualizado_em: atualizadoEm } : {}),
       participantes: participantes ?? [
         { usuario_id: new Types.ObjectId(responsavelId), convite: RespostaConvite.ACEITO },
         { usuario_id: new Types.ObjectId(membroId), convite: RespostaConvite.PENDENTE },
@@ -153,6 +161,8 @@ describe('Regras de reuniões', () => {
       comissoes as unknown as Model<ComissaoDocument>,
       organizacoes as unknown as Model<OrganizacaoDocument>,
       usuarios as unknown as Model<UsuarioDocument>,
+      {} as Connection,
+      {} as Model<ContadorDocument>,
     );
     return { service, reunioes };
   }
@@ -172,6 +182,36 @@ describe('Regras de reuniões', () => {
       }),
     );
     expect(resultado.sou_dono).toBe(true);
+  });
+
+  it('agenda sem local e grava o local vazio', async () => {
+    const { service, reunioes } = preparar();
+    const { local: _local, ...semLocal } = novaReuniao;
+    await service.criar(semLocal, responsavelId);
+    expect(reunioes.create).toHaveBeenCalledWith(
+      expect.objectContaining({ local: '', dia_inteiro: false }),
+    );
+  });
+
+  it('agenda reunião de dia inteiro com o início e o fim enviados pelo app', async () => {
+    const { service, reunioes } = preparar();
+    // 17/10 das 00:00:00.000 às 23:59:59.999 em Brasília (UTC-3).
+    await service.criar(
+      {
+        ...novaReuniao,
+        inicio: '2026-10-17T03:00:00.000Z',
+        fim: '2026-10-18T02:59:59.999Z',
+        dia_inteiro: true,
+      },
+      responsavelId,
+    );
+    expect(reunioes.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dia_inteiro: true,
+        inicio: new Date('2026-10-17T03:00:00.000Z'),
+        fim: new Date('2026-10-18T02:59:59.999Z'),
+      }),
+    );
   });
 
   it('lista vazia convida somente o organizador, sem incluir toda a comissão', async () => {
@@ -269,12 +309,120 @@ describe('Regras de reuniões', () => {
     expect(encerrada.reunioes.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it('a alteração da reunião aceita somente o cancelamento', async () => {
+  it('a alteração aceita o cancelamento ou os campos da reunião, com as regras da criação', async () => {
     const campos = (dados: Record<string, unknown>) =>
       validate(plainToInstance(UpdateReuniaoDto, dados)).then((erros) => erros.map((erro) => erro.property));
     expect(await campos({ situacao: SituacaoReuniao.CANCELADA })).toEqual([]);
-    expect(await campos({ titulo: 'Outro título', inicio: '2026-10-17T10:00:00.000Z' })).toEqual(['situacao']);
+    expect(await campos({ titulo: 'Outro título', inicio: '2026-10-17T10:00:00.000Z', local: '' })).toEqual([]);
     expect(await campos({ situacao: SituacaoReuniao.AGENDADA })).toEqual(['situacao']);
+    expect(await campos({ titulo: 'a', local: 'A', inicio: '17/10', convidados_ids: ['x'] })).toEqual(
+      expect.arrayContaining(['titulo', 'local', 'inicio', 'convidados_ids']),
+    );
+  });
+
+  describe('edição', () => {
+    // Reunião de amanhã, ainda não começou.
+    const AMANHA_INICIO = new Date('2026-10-17T17:00:00.000Z');
+    const AMANHA_FIM = new Date('2026-10-17T18:00:00.000Z');
+    const aceitos = (): ParticipanteTeste[] => [
+      { usuario_id: new Types.ObjectId(responsavelId), convite: RespostaConvite.ACEITO },
+      { usuario_id: new Types.ObjectId(membroId), convite: RespostaConvite.ACEITO },
+    ];
+    const gravado = (reunioes: { findOneAndUpdate: ReturnType<typeof vi.fn> }) =>
+      reunioes.findOneAndUpdate.mock.calls[0][1].$set;
+
+    it('recusa cancelar e editar juntos, pedido vazio e quem não agendou', async () => {
+      const { service } = preparar({ inicio: AMANHA_INICIO, fim: AMANHA_FIM });
+      await expect(
+        service.atualizar(reuniaoId, { situacao: SituacaoReuniao.CANCELADA, titulo: 'Outro' }, responsavelId),
+      ).rejects.toThrow('Cancele ou edite a reunião, não as duas coisas juntas');
+      await expect(service.atualizar(reuniaoId, {}, responsavelId)).rejects.toThrow('Nada para alterar');
+      await expect(service.atualizar(reuniaoId, { titulo: 'Outro' }, membroId)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('trocar só o título mantém as respostas dos convidados', async () => {
+      const { service, reunioes } = preparar({ inicio: AMANHA_INICIO, fim: AMANHA_FIM, participantes: aceitos() });
+      await service.atualizar(reuniaoId, { titulo: 'Novo título' }, responsavelId);
+      const set = gravado(reunioes);
+      expect(set.titulo).toBe('Novo título');
+      expect(set.participantes.map((p: ParticipanteTeste) => p.convite)).toEqual([
+        RespostaConvite.ACEITO,
+        RespostaConvite.ACEITO,
+      ]);
+      expect(set.horario_alterado_em).toBeUndefined();
+    });
+
+    it('mudar o horário volta as respostas para pendente, menos a de quem agendou', async () => {
+      const { service, reunioes } = preparar({ inicio: AMANHA_INICIO, fim: AMANHA_FIM, participantes: aceitos() });
+      await service.atualizar(
+        reuniaoId,
+        { inicio: '2026-10-17T18:00:00.000Z', fim: '2026-10-17T19:00:00.000Z' },
+        responsavelId,
+      );
+      const set = gravado(reunioes);
+      expect(set.participantes.map((p: ParticipanteTeste) => p.convite)).toEqual([
+        RespostaConvite.ACEITO,
+        RespostaConvite.PENDENTE,
+      ]);
+      expect(set.horario_alterado_em).toEqual(AGORA);
+    });
+
+    it('trava data e horário quando a reunião já começou, mas aceita outros campos', async () => {
+      const { service, reunioes } = preparar();
+      await expect(
+        service.atualizar(reuniaoId, { fim: '2026-10-16T19:00:00.000Z' }, responsavelId),
+      ).rejects.toThrow('A reunião já começou; a data e o horário não podem mudar');
+      await service.atualizar(reuniaoId, { local: 'Auditório' }, responsavelId);
+      expect(gravado(reunioes).local).toBe('Auditório');
+    });
+
+    it('não edita reunião cancelada ou encerrada', async () => {
+      const cancelada = preparar({ situacao: SituacaoReuniao.CANCELADA, inicio: AMANHA_INICIO, fim: AMANHA_FIM });
+      await expect(cancelada.service.atualizar(reuniaoId, { titulo: 'Outro' }, responsavelId)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      const encerrada = preparar({ inicio: new Date('2026-10-16T10:00:00.000Z'), fim: new Date('2026-10-16T11:00:00.000Z') });
+      await expect(encerrada.service.atualizar(reuniaoId, { titulo: 'Outro' }, responsavelId)).rejects.toThrow(
+        'Esta reunião já terminou',
+      );
+    });
+
+    it('adiciona convidados como pendentes, remove quem saiu da lista e mantém quem agendou', async () => {
+      const soDono = preparar({
+        inicio: AMANHA_INICIO,
+        fim: AMANHA_FIM,
+        participantes: [{ usuario_id: new Types.ObjectId(responsavelId), convite: RespostaConvite.ACEITO }],
+      });
+      await soDono.service.atualizar(reuniaoId, { convidados_ids: [membroId] }, responsavelId);
+      expect(gravado(soDono.reunioes).participantes).toEqual([
+        { usuario_id: new Types.ObjectId(responsavelId), convite: RespostaConvite.ACEITO },
+        { usuario_id: new Types.ObjectId(membroId), convite: RespostaConvite.PENDENTE },
+      ]);
+
+      const comMembro = preparar({ inicio: AMANHA_INICIO, fim: AMANHA_FIM, participantes: aceitos() });
+      await comMembro.service.atualizar(reuniaoId, { convidados_ids: [] }, responsavelId);
+      expect(gravado(comMembro.reunioes).participantes).toEqual([
+        { usuario_id: new Types.ObjectId(responsavelId), convite: RespostaConvite.ACEITO },
+      ]);
+
+      await expect(
+        comMembro.service.atualizar(reuniaoId, { convidados_ids: [externoId] }, responsavelId),
+      ).rejects.toThrow('Convide apenas integrantes desta comissão');
+    });
+
+    it('só grava se a reunião não mudou desde a leitura', async () => {
+      const lidoEm = new Date('2026-10-16T17:20:00.000Z');
+      const { service, reunioes } = preparar({ inicio: AMANHA_INICIO, fim: AMANHA_FIM, atualizadoEm: lidoEm });
+      reunioes.findOneAndUpdate.mockReturnValueOnce(consulta(null));
+      await expect(service.atualizar(reuniaoId, { titulo: 'Outro' }, responsavelId)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect((reunioes.findOneAndUpdate.mock.calls[0] as unknown[])[0]).toEqual(
+        expect.objectContaining({ atualizado_em: lidoEm }),
+      );
+    });
   });
 
   it('o convidado aceita ou recusa, exceto o organizador, quem já entrou e em reunião cancelada', async () => {
@@ -313,6 +461,7 @@ describe('Regras de reuniões', () => {
     expect(reunioes.findOneAndUpdate).toHaveBeenLastCalledWith(
       expect.anything(),
       {
+        $inc: { presencas_revisao: 1 },
         $set: {
           'participantes.$.presenca': {
             entrada: AGORA,
@@ -327,6 +476,7 @@ describe('Regras de reuniões', () => {
     expect(reunioes.findOneAndUpdate).toHaveBeenLastCalledWith(
       expect.anything(),
       {
+        $inc: { presencas_revisao: 1 },
         $set: {
           'participantes.$.presenca': expect.objectContaining({
             situacao: SituacaoPresenca.CONFIRMADA,
@@ -397,7 +547,7 @@ describe('Regras de reuniões', () => {
     await comEntrada.service.marcarSaida(reuniaoId, membroId);
     expect(comEntrada.reunioes.findOneAndUpdate).toHaveBeenCalledWith(
       expect.anything(),
-      { $set: { 'participantes.$.presenca.saida': FIM } },
+      { $set: { 'participantes.$.presenca.saida': FIM }, $inc: { presencas_revisao: 1 } },
       expect.anything(),
     );
   });
@@ -419,6 +569,7 @@ describe('Regras de reuniões', () => {
     expect(reunioes.findOneAndUpdate).toHaveBeenCalledWith(
       expect.anything(),
       {
+        $inc: { presencas_revisao: 1 },
         $set: {
           'participantes.$.presenca': {
             entrada: INICIO,
@@ -441,7 +592,7 @@ describe('Regras de reuniões', () => {
     await service.atualizarPresenca(reuniaoId, membroId, SituacaoPresenca.CONFIRMADA, responsavelId);
     expect(reunioes.findOneAndUpdate).toHaveBeenCalledWith(
       expect.anything(),
-      { $set: { 'participantes.$.presenca.situacao': SituacaoPresenca.CONFIRMADA } },
+      { $set: { 'participantes.$.presenca.situacao': SituacaoPresenca.CONFIRMADA }, $inc: { presencas_revisao: 1 } },
       expect.anything(),
     );
   });
@@ -457,10 +608,45 @@ describe('Regras de reuniões', () => {
     });
     const campos = (await validate(dto)).map((erro) => erro.property);
     expect(campos).toEqual(
-      expect.arrayContaining(['comissao_id', 'titulo', 'local', 'inicio', 'fim']),
+      expect.arrayContaining(['comissao_id', 'titulo', 'inicio', 'fim']),
     );
+    expect(campos).not.toContain('local');
     expect(campos).not.toContain('pauta');
+    expect(dto.local).toBe('');
     expect(dto.pauta).toBe('Despesas do mês\nPróximos passos');
+  });
+
+  it('local é opcional, mas quando informado precisa de 2 a 120 caracteres', async () => {
+    const base = {
+      comissao_id: comissaoId,
+      titulo: 'Reunião',
+      inicio: '2026-10-17T15:00:00.000Z',
+      fim: '2026-10-17T16:00:00.000Z',
+    };
+    const camposCom = async (extra: Record<string, unknown>) =>
+      (await validate(plainToInstance(CreateReuniaoDto, { ...base, ...extra }))).map(
+        (erro) => erro.property,
+      );
+    expect(await camposCom({})).not.toContain('local');
+    expect(await camposCom({ local: 'Sala 2' })).not.toContain('local');
+    expect(await camposCom({ local: 'A' })).toContain('local');
+    expect(await camposCom({ local: 'x'.repeat(121) })).toContain('local');
+  });
+
+  it('dia_inteiro é opcional e precisa ser booleano', async () => {
+    const base = {
+      comissao_id: comissaoId,
+      titulo: 'Reunião',
+      inicio: '2026-10-17T03:00:00.000Z',
+      fim: '2026-10-18T02:59:59.999Z',
+    };
+    const camposCom = async (extra: Record<string, unknown>) =>
+      (await validate(plainToInstance(CreateReuniaoDto, { ...base, ...extra }))).map(
+        (erro) => erro.property,
+      );
+    expect(await camposCom({})).not.toContain('dia_inteiro');
+    expect(await camposCom({ dia_inteiro: true })).not.toContain('dia_inteiro');
+    expect(await camposCom({ dia_inteiro: 'sim' })).toContain('dia_inteiro');
   });
 
   it('recusa pauta em lista ou maior que 2000 caracteres', async () => {

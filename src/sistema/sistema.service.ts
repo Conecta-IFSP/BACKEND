@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { type Connection, Model } from 'mongoose';
 import * as os from 'node:os';
 import * as bcrypt from 'bcrypt';
 
@@ -22,6 +22,7 @@ export class SistemaService {
     @InjectModel(Organizacao.name) private readonly organizacoes: Model<OrganizacaoDocument>,
     @InjectModel(Comissao.name) private readonly comissoes: Model<ComissaoDocument>,
     @InjectModel(Reuniao.name) private readonly reunioes: Model<ReuniaoDocument>,
+    @InjectConnection() private readonly conexao: Connection,
   ) {}
 
   async status() {
@@ -85,6 +86,11 @@ export class SistemaService {
       this.organizacoes.deleteMany({}).exec(),
       this.comissoes.deleteMany({}).exec(),
       this.reunioes.deleteMany({}).exec(),
+      // Arquivos anexados às reuniões (GridFS, bucket "anexos").
+      this.conexao.db!.collection('anexos.files').deleteMany({}),
+      this.conexao.db!.collection('anexos.chunks').deleteMany({}),
+      // Numeração das atas por comissão e ano.
+      this.conexao.db!.collection('contadores').deleteMany({}),
     ]);
 
     return { status: 'sistema_resetado', resetado_em: new Date() };
