@@ -461,6 +461,7 @@ describe('Regras de reuniões', () => {
     expect(reunioes.findOneAndUpdate).toHaveBeenLastCalledWith(
       expect.anything(),
       {
+        $inc: { presencas_revisao: 1 },
         $set: {
           'participantes.$.presenca': {
             entrada: AGORA,
@@ -475,6 +476,7 @@ describe('Regras de reuniões', () => {
     expect(reunioes.findOneAndUpdate).toHaveBeenLastCalledWith(
       expect.anything(),
       {
+        $inc: { presencas_revisao: 1 },
         $set: {
           'participantes.$.presenca': expect.objectContaining({
             situacao: SituacaoPresenca.CONFIRMADA,
@@ -545,7 +547,7 @@ describe('Regras de reuniões', () => {
     await comEntrada.service.marcarSaida(reuniaoId, membroId);
     expect(comEntrada.reunioes.findOneAndUpdate).toHaveBeenCalledWith(
       expect.anything(),
-      { $set: { 'participantes.$.presenca.saida': FIM } },
+      { $set: { 'participantes.$.presenca.saida': FIM }, $inc: { presencas_revisao: 1 } },
       expect.anything(),
     );
   });
@@ -567,6 +569,7 @@ describe('Regras de reuniões', () => {
     expect(reunioes.findOneAndUpdate).toHaveBeenCalledWith(
       expect.anything(),
       {
+        $inc: { presencas_revisao: 1 },
         $set: {
           'participantes.$.presenca': {
             entrada: INICIO,
@@ -589,7 +592,7 @@ describe('Regras de reuniões', () => {
     await service.atualizarPresenca(reuniaoId, membroId, SituacaoPresenca.CONFIRMADA, responsavelId);
     expect(reunioes.findOneAndUpdate).toHaveBeenCalledWith(
       expect.anything(),
-      { $set: { 'participantes.$.presenca.situacao': SituacaoPresenca.CONFIRMADA } },
+      { $set: { 'participantes.$.presenca.situacao': SituacaoPresenca.CONFIRMADA }, $inc: { presencas_revisao: 1 } },
       expect.anything(),
     );
   });
